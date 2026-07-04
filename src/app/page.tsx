@@ -6,6 +6,7 @@
  * complexity for a one-shot initial fetch.
  */
 
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Plus } from "lucide-react";
@@ -295,7 +296,14 @@ export default function Page() {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b bg-card/30 px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <div className="size-6 rounded-md bg-foreground" />
+          <div className="flex size-10 items-center justify-center rounded-sm bg-[#f4f3ee]">
+            <Image
+              src="/logo.png"
+              alt="Claude Config"
+              width={32}
+              height={32}
+            />
+          </div>
           <div>
             <h1 className="text-sm font-semibold leading-none">
               Claude Config
