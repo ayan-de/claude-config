@@ -141,7 +141,7 @@ export function ProviderForm({
                 Override Claude Code&apos;s default model selection.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="model" className="text-xs">
                   Default
@@ -188,7 +188,7 @@ export function ProviderForm({
                   className="font-mono text-xs"
                 />
               </div>
-              <div className="col-span-2 space-y-1.5">
+              <div className="col-span-1 md:col-span-2 space-y-1.5">
                 <Label htmlFor="defaultHaikuModel" className="text-xs">
                   Haiku override
                 </Label>

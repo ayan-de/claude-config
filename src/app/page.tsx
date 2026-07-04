@@ -1,7 +1,7 @@
 "use client";
 
-import Image from "next/image";
-import { Plus, PanelLeftOpen } from "lucide-react";
+
+import { PanelLeftOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { isWebEnv } from "@/lib/utils-app";
@@ -32,7 +32,6 @@ export default function Page() {
     saving,
     deleteTarget,
     deleting,
-    keyringAvailable,
     setDeleteTarget,
     sidebarCollapsed,
     toggleSidebar,
@@ -86,34 +85,34 @@ export default function Page() {
   const editingProvider = mode.kind === "editing" ? mode.provider : null;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <TitleBar
         left={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             {sidebarCollapsed && (
               <Button
                 variant="ghost"
-                className="h-7 w-7 p-0 tauri-no-drag"
+                className="h-7 w-7 p-0 tauri-no-drag shrink-0"
                 onClick={toggleSidebar}
                 title="Expand sidebar"
               >
                 <PanelLeftOpen className="size-3.5" />
               </Button>
             )}
-            <div className="flex items-center gap-3">
-              <div className="flex size-8 items-center justify-center rounded-sm bg-[#f4f3ee]">
-                <Image
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-[#f4f3ee]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
                   src="/logo.png"
                   alt="Claude Config"
-                  width={28}
-                  height={28}
+                  className="size-7 object-contain shrink-0"
                 />
               </div>
-              <div>
-                <h1 className="text-sm font-semibold leading-none">
+              <div className="flex flex-col justify-center shrink-0">
+                <h1 className="text-sm font-semibold leading-none shrink-0">
                   Claude Config
                 </h1>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                <p className="mt-0.5 text-[10px] text-muted-foreground hidden sm:block shrink-0">
                   Manage Claude Code providers
                 </p>
               </div>
@@ -122,10 +121,6 @@ export default function Page() {
         }
         actions={
           <div className="flex items-center gap-2 pr-2">
-            <Button size="sm" onClick={handleNew} disabled={!keyringAvailable}>
-              <Plus className="size-3.5" />
-              New provider
-            </Button>
             <SettingsMenu
               appDataDir={appDataDir}
               claudeDir={claudeDir}

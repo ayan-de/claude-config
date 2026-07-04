@@ -86,7 +86,32 @@ export function useProvidersApp() {
       void refresh();
     }
   }, [refresh]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const threshold = 960;
+    const lastWidth = { current: window.innerWidth };
 
+    const handleResize = () => {
+      const width = window.innerWidth;
+      const wasWide = lastWidth.current >= threshold;
+      const isNarrow = width < threshold;
+
+      if (wasWide && isNarrow) {
+        setSidebarCollapsed(true);
+      } else if (!wasWide && !isNarrow) {
+        setSidebarCollapsed(false);
+      }
+      lastWidth.current = width;
+    };
+
+    // Initial check
+    if (window.innerWidth < threshold) {
+      setSidebarCollapsed(true);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
   const keyringAvailable = keyring?.status === "available";
 
   const handleSelect = useCallback((id: string) => {
