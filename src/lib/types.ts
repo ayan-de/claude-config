@@ -4,7 +4,7 @@
 export interface Provider {
   id: string;
   name: string;
-  baseUrl: string;
+  base_url: string;
   model?: string;
   smallFastModel?: string;
   defaultSonnetModel?: string;
@@ -12,15 +12,15 @@ export interface Provider {
   defaultHaikuModel?: string;
   apiTimeoutMs?: number;
   disableNonessentialTraffic?: boolean;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProviderInput {
   id?: string;
   name: string;
-  baseUrl: string;
-  authToken: string;
+  base_url: string;
+  auth_token: string;
   model?: string;
   smallFastModel?: string;
   defaultSonnetModel?: string;

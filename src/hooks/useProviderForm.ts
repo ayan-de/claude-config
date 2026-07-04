@@ -11,7 +11,7 @@ interface UseProviderFormProps {
 }
 
 export function useProviderForm({ editing, onSave, isSaving }: UseProviderFormProps) {
-  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "");
+  const [baseUrl, setBaseUrl] = useState(editing?.base_url ?? "");
   const [authToken, setAuthToken] = useState("");
   const [model, setModel] = useState(editing?.model ?? "");
   const [smallFastModel, setSmallFastModel] = useState(
@@ -76,8 +76,8 @@ export function useProviderForm({ editing, onSave, isSaving }: UseProviderFormPr
     await onSave({
       id: editing?.id,
       name: finalName,
-      baseUrl: baseUrl.trim(),
-      authToken: authToken.trim() || (editing ? "unchanged" : ""),
+      base_url: baseUrl.trim(),
+      auth_token: authToken.trim() || (editing ? "unchanged" : ""),
       model: model.trim() || undefined,
       smallFastModel: smallFastModel.trim() || undefined,
       defaultSonnetModel: defaultSonnetModel.trim() || undefined,
