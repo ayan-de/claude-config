@@ -23,7 +23,7 @@ jobs:
             tauri-args: ""
           - name: macos-universal
             os: macos-latest
-            rust-target: universal-apple-darwin
+            rust-target: aarch64-apple-darwin
             tauri-args: "--target universal-apple-darwin"
           - name: windows-x86_64
             os: windows-latest
