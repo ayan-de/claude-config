@@ -127,6 +127,9 @@
   html {
     @apply font-sans;
   }
+  button:not(:disabled) {
+    @apply cursor-pointer;
+  }
 }
 
 @layer utilities {
