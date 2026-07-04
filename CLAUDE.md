@@ -83,8 +83,8 @@ There is no JS/TS unit-test runner — only Rust tests + lint + typecheck.
   it. ESLint already skips it.
 - ESLint extends `eslint-config-next` and **adds `src-tauri/target/` to
   ignores** — Tauri generates JS into that path during builds.
-- `pnpm-workspace.yaml` here only configures `ignoredBuiltDependencies`
-  (`sharp`, `unrs-resolver`); it is **not** a multi-package workspace.
+- Not a pnpm workspace. `ignoredBuiltDependencies` (`sharp`, `unrs-resolver`)
+  lives in `package.json` under the `pnpm` key.
 - Honored env: `CLAUDE_CONFIG_DIR` (custom Claude Code config path) and
   `TAURI_DEV_HOST` (mobile dev). See `next.config.ts`.
 - Arch Linux has no native `.pkg.tar` target — README explains the
