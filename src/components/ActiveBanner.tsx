@@ -5,9 +5,9 @@ import type { Provider } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 
 export function ActiveBanner({ provider }: { provider: Provider }) {
-  let host = provider.baseUrl;
+  let host = provider.base_url;
   try {
-    host = new URL(provider.baseUrl).host;
+    host = new URL(provider.base_url).host;
   } catch {
     // Invalid URL — fall back to the raw string. Doesn't crash the UI.
   }
@@ -24,7 +24,7 @@ export function ActiveBanner({ provider }: { provider: Provider }) {
         </Badge>
       </div>
       <span className="text-[10px] text-muted-foreground/70">
-        updated {new Date(provider.updatedAt).toLocaleDateString()}
+        updated {new Date(provider.updated_at).toLocaleDateString()}
       </span>
     </div>
   );

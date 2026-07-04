@@ -6,8 +6,9 @@ import { PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isWebEnv } from "@/lib/utils-app";
 import { useProvidersApp } from "@/hooks/useProvidersApp";
+import { cn } from "@/lib/utils";
 
-import { ActiveBanner } from "@/components/ActiveBanner";
+
 import { CustomConfigBanner } from "@/components/CustomConfigBanner";
 import { DeleteDialog } from "@/components/DeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -83,6 +84,8 @@ export default function Page() {
 
   const showForm = mode.kind !== "idle";
   const editingProvider = mode.kind === "editing" ? mode.provider : null;
+  const loadingProvider = providers.find((p) => p.id === loadingId) ?? null;
+  const displayProvider = loadingProvider || active;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -154,15 +157,47 @@ export default function Page() {
           <div className="mx-auto max-w-2xl space-y-4">
             <KeyringWarning status={keyring} />
 
-            {active && !showForm && (
-              <ActiveBanner provider={active} />
-            )}
+
 
             {customEnvKeys && !showForm && (
               <CustomConfigBanner
                 envKeys={customEnvKeys}
                 onSaveAs={handleSaveCurrentAs}
               />
+            )}
+
+            {!showForm && displayProvider && (
+              <div className="rounded-xl border bg-card/45 p-5 mb-4">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3 select-none">
+                  Active provider
+                </p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold truncate leading-none">
+                      {displayProvider.name}
+                    </h3>
+                    <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground/80 leading-none">
+                      {(() => {
+                        try {
+                          return new URL(displayProvider.base_url).host;
+                        } catch {
+                          return displayProvider.base_url;
+                        }
+                      })()}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[10px] font-medium px-2.5 py-0.5 rounded-full shrink-0 border select-none transition-all duration-150",
+                      loadingId
+                        ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
+                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+                    )}
+                  >
+                    {loadingId ? "switching…" : "connected"}
+                  </span>
+                </div>
+              </div>
             )}
 
             {showForm ? (
