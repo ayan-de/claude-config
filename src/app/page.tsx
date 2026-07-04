@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Plus } from "lucide-react";
+import { Plus, PanelLeftOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { isWebEnv } from "@/lib/utils-app";
@@ -34,6 +34,8 @@ export default function Page() {
     deleting,
     keyringAvailable,
     setDeleteTarget,
+    sidebarCollapsed,
+    toggleSidebar,
     handleSelect,
     handleNew,
     handleCancel,
@@ -84,25 +86,37 @@ export default function Page() {
   const editingProvider = mode.kind === "editing" ? mode.provider : null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-screen w-screen flex-col overflow-hidden">
       <TitleBar
         left={
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-sm bg-[#f4f3ee]">
-              <Image
-                src="/logo.png"
-                alt="Claude Config"
-                width={28}
-                height={28}
-              />
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold leading-none">
-                Claude Config
-              </h1>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Manage Claude Code providers
-              </p>
+            {sidebarCollapsed && (
+              <Button
+                variant="ghost"
+                className="h-7 w-7 p-0 tauri-no-drag"
+                onClick={toggleSidebar}
+                title="Expand sidebar"
+              >
+                <PanelLeftOpen className="size-3.5" />
+              </Button>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="flex size-8 items-center justify-center rounded-sm bg-[#f4f3ee]">
+                <Image
+                  src="/logo.png"
+                  alt="Claude Config"
+                  width={28}
+                  height={28}
+                />
+              </div>
+              <div>
+                <h1 className="text-sm font-semibold leading-none">
+                  Claude Config
+                </h1>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Manage Claude Code providers
+                </p>
+              </div>
             </div>
           </div>
         }
@@ -126,6 +140,8 @@ export default function Page() {
 
       <div className="flex min-h-0 flex-1">
         <ProviderList
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={toggleSidebar}
           providers={providers}
           activeProviderId={active?.id ?? null}
           selectedId={editingProvider?.id ?? null}

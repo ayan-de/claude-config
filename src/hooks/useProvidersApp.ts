@@ -43,6 +43,7 @@ export function useProvidersApp() {
   const [appDataDir, setAppDataDir] = useState<string | null>(null);
   const [claudeDir, setClaudeDir] = useState<string | null>(null);
   const [mode, setMode] = useState<AppMode>({ kind: "idle" });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Provider | null>(null);
@@ -102,6 +103,10 @@ export function useProvidersApp() {
 
   const handleCancel = useCallback(() => {
     setMode({ kind: "idle" });
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((c) => !c);
   }, []);
 
   const handleSave = useCallback(async (input: ProviderInput) => {
@@ -265,6 +270,8 @@ export function useProvidersApp() {
     deleting,
     keyringAvailable,
     setDeleteTarget,
+    sidebarCollapsed,
+    toggleSidebar,
     handleSelect,
     handleNew,
     handleCancel,
