@@ -1,6 +1,7 @@
 "use client";
 
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Eye, EyeOff, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,21 @@ export function ProviderForm({
   onSave,
   isSaving,
 }: Props) {
+  const [modelsExpanded, setModelsExpanded] = useState(() => {
+    if (!editing) return false;
+    return !!(
+      editing.model ||
+      editing.smallFastModel ||
+      editing.defaultSonnetModel ||
+      editing.defaultOpusModel ||
+      editing.defaultHaikuModel
+    );
+  });
+  const [advancedExpanded, setAdvancedExpanded] = useState(() => {
+    if (!editing) return false;
+    return !!(editing.apiTimeoutMs || editing.disableNonessentialTraffic);
+  });
+
   const {
     baseUrl,
     setBaseUrl,
@@ -133,116 +149,148 @@ export function ProviderForm({
 
           {/* Models */}
           <div className="space-y-3">
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Models (optional)
-              </h3>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Override Claude Code&apos;s default model selection.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="model" className="text-xs">
-                  Default
-                </Label>
-                <Input
-                  id="model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="claude-sonnet-4-6"
-                  className="font-mono text-xs"
-                />
+            <button
+              type="button"
+              onClick={() => setModelsExpanded(!modelsExpanded)}
+              className="flex w-full items-center justify-between text-left group focus:outline-none cursor-pointer"
+            >
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors flex items-center gap-1.5">
+                  Models (optional)
+                  {modelsExpanded ? (
+                    <ChevronDown className="size-3.5" />
+                  ) : (
+                    <ChevronRight className="size-3.5" />
+                  )}
+                </h3>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Override Claude Code&apos;s default model selection.
+                </p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="smallFastModel" className="text-xs">
-                  Small / fast
-                </Label>
-                <Input
-                  id="smallFastModel"
-                  value={smallFastModel}
-                  onChange={(e) => setSmallFastModel(e.target.value)}
-                  placeholder="claude-haiku-4-5"
-                  className="font-mono text-xs"
-                />
+            </button>
+
+            {modelsExpanded && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1.5">
+                  <Label htmlFor="model" className="text-xs">
+                    Default
+                  </Label>
+                  <Input
+                    id="model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="claude-sonnet-4-6"
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="smallFastModel" className="text-xs">
+                    Small / fast
+                  </Label>
+                  <Input
+                    id="smallFastModel"
+                    value={smallFastModel}
+                    onChange={(e) => setSmallFastModel(e.target.value)}
+                    placeholder="claude-haiku-4-5"
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="defaultSonnetModel" className="text-xs">
+                    Sonnet override
+                  </Label>
+                  <Input
+                    id="defaultSonnetModel"
+                    value={defaultSonnetModel}
+                    onChange={(e) => setDefaultSonnetModel(e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="defaultOpusModel" className="text-xs">
+                    Opus override
+                  </Label>
+                  <Input
+                    id="defaultOpusModel"
+                    value={defaultOpusModel}
+                    onChange={(e) => setDefaultOpusModel(e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="col-span-1 md:col-span-2 space-y-1.5">
+                  <Label htmlFor="defaultHaikuModel" className="text-xs">
+                    Haiku override
+                  </Label>
+                  <Input
+                    id="defaultHaikuModel"
+                    value={defaultHaikuModel}
+                    onChange={(e) => setDefaultHaikuModel(e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="defaultSonnetModel" className="text-xs">
-                  Sonnet override
-                </Label>
-                <Input
-                  id="defaultSonnetModel"
-                  value={defaultSonnetModel}
-                  onChange={(e) => setDefaultSonnetModel(e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="defaultOpusModel" className="text-xs">
-                  Opus override
-                </Label>
-                <Input
-                  id="defaultOpusModel"
-                  value={defaultOpusModel}
-                  onChange={(e) => setDefaultOpusModel(e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
-              <div className="col-span-1 md:col-span-2 space-y-1.5">
-                <Label htmlFor="defaultHaikuModel" className="text-xs">
-                  Haiku override
-                </Label>
-                <Input
-                  id="defaultHaikuModel"
-                  value={defaultHaikuModel}
-                  onChange={(e) => setDefaultHaikuModel(e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
-            </div>
+            )}
           </div>
 
           <Separator />
 
           {/* Advanced */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Advanced
-            </h3>
-            <div className="space-y-1.5">
-              <Label htmlFor="apiTimeoutMs" className="text-xs">
-                API timeout (ms)
-              </Label>
-              <Input
-                id="apiTimeoutMs"
-                value={apiTimeoutMs}
-                onChange={(e) => setApiTimeoutMs(e.target.value)}
-                placeholder="3000000"
-                className={cn("font-mono text-xs", timeoutError && "border-destructive")}
-                inputMode="numeric"
-              />
-              {timeoutError && (
-                <p className="text-xs text-destructive">{timeoutError}</p>
-              )}
-            </div>
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-muted/20 p-2.5">
-              <input
-                type="checkbox"
-                checked={disableNonessentialTraffic}
-                onChange={(e) =>
-                  setDisableNonessentialTraffic(e.target.checked)
-                }
-                className="mt-0.5 size-3.5 accent-foreground"
-              />
-              <div className="space-y-0.5">
-                <span className="text-xs font-medium">
-                  Block non-essential traffic
-                </span>
-                <p className="text-[10px] text-muted-foreground">
-                  Sets CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-                </p>
+            <button
+              type="button"
+              onClick={() => setAdvancedExpanded(!advancedExpanded)}
+              className="flex w-full items-center justify-between text-left group focus:outline-none cursor-pointer"
+            >
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors flex items-center gap-1.5">
+                  Advanced
+                  {advancedExpanded ? (
+                    <ChevronDown className="size-3.5" />
+                  ) : (
+                    <ChevronRight className="size-3.5" />
+                  )}
+                </h3>
               </div>
-            </label>
+            </button>
+
+            {advancedExpanded && (
+              <div className="space-y-3 pt-1">
+                <div className="space-y-1.5">
+                  <Label htmlFor="apiTimeoutMs" className="text-xs">
+                    API timeout (ms)
+                  </Label>
+                  <Input
+                    id="apiTimeoutMs"
+                    value={apiTimeoutMs}
+                    onChange={(e) => setApiTimeoutMs(e.target.value)}
+                    placeholder="3000000"
+                    className={cn("font-mono text-xs", timeoutError && "border-destructive")}
+                    inputMode="numeric"
+                  />
+                  {timeoutError && (
+                    <p className="text-xs text-destructive">{timeoutError}</p>
+                  )}
+                </div>
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-muted/20 p-2.5">
+                  <input
+                    type="checkbox"
+                    checked={disableNonessentialTraffic}
+                    onChange={(e) =>
+                      setDisableNonessentialTraffic(e.target.checked)
+                    }
+                    className="mt-0.5 size-3.5 accent-foreground"
+                  />
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-medium">
+                      Block non-essential traffic
+                    </span>
+                    <p className="text-[10px] text-muted-foreground">
+                      Sets CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2">
