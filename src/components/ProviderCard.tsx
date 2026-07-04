@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Pencil, Play, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Provider } from "@/lib/types";
@@ -26,87 +26,99 @@ export function ProviderCard({
 }: Props) {
   let host = "";
   try {
-    host = new URL(provider.baseUrl).host;
+    host = new URL(provider.base_url).host;
   } catch {
-    host = provider.baseUrl;
+    host = provider.base_url;
   }
+
   return (
     <div
       className={cn(
-        "group relative cursor-pointer rounded-lg border bg-card p-3 transition-colors",
-        isSelected
-          ? "border-foreground/30 bg-card/80 ring-1 ring-foreground/10"
-          : "border-border hover:border-foreground/20",
+        "group relative cursor-pointer rounded-xl border bg-card/60 py-2.5 px-3 transition-all duration-200 select-none flex flex-col items-center gap-2",
+        isActive
+          ? "border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_12px_rgba(16,185,129,0.03)]"
+          : isSelected
+          ? "border-foreground/30 bg-card/90"
+          : "border-border hover:border-foreground/20 hover:bg-card/80",
       )}
       onClick={onSelect}
+      role="button"
+      aria-pressed={isActive ? "true" : "false"}
+      aria-label={`Switch to ${provider.name}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                isActive ? "bg-emerald-400" : "bg-muted-foreground/30",
-              )}
-              title={isActive ? "Active" : "Inactive"}
-            />
-            <span className="truncate text-sm font-medium">
-              {provider.name}
-            </span>
-          </div>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-            {host}
-          </p>
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          "mt-3 flex items-center gap-1.5 transition-opacity",
-          isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-        )}
-      >
+      {/* hover-only actions positioned absolutely in the top-right corner */}
+      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           size="sm"
-          variant="default"
-          onClick={(e) => {
-            e.stopPropagation();
-            onLoad();
-          }}
-          disabled={isLoading}
-          className="h-7 flex-1 px-2 text-xs"
-        >
-          {isLoading ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : (
-            <Play className="size-3" />
-          )}
-          Load
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={(e) => {
             e.stopPropagation();
             onSelect();
           }}
-          className="h-7 px-2"
+          className="h-5 w-5 p-0 hover:bg-accent cursor-pointer"
           aria-label="Edit"
         >
-          <Pencil className="size-3" />
+          <Pencil className="size-2.5 text-muted-foreground hover:text-foreground" />
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
-          className="h-7 px-2 hover:bg-destructive/10 hover:text-destructive"
+          className="h-5 w-5 p-0 hover:bg-destructive/10 cursor-pointer"
           aria-label="Delete"
         >
-          <Trash2 className="size-3" />
+          <Trash2 className="size-2.5 text-muted-foreground hover:text-destructive" />
         </Button>
+      </div>
+
+      {/* Center: Circuit-breaker Toggle Switch */}
+      <div
+        className="tauri-no-drag"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isLoading) onLoad();
+        }}
+      >
+        <div
+          className={cn(
+            "w-11 h-6 rounded-full border relative transition-colors duration-150 flex items-center cursor-pointer",
+            isActive
+              ? "bg-emerald-500/20 border-emerald-500/30"
+              : "bg-muted/40 border-border hover:bg-muted/60",
+            isLoading && "opacity-80 cursor-wait"
+          )}
+        >
+          <div
+            className={cn(
+              "absolute top-[2.5px] w-[17px] h-[17px] rounded-full transition-all duration-150 flex items-center justify-center",
+              isActive
+                ? "left-[22.5px] bg-emerald-400 border border-emerald-500"
+                : "left-[2.5px] bg-background border border-muted-foreground/30",
+            )}
+          >
+            {isLoading && (
+              <Loader2 className="size-2 animate-spin text-emerald-700" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom: Provider details */}
+      <div className="text-center min-w-0 w-full">
+        <p
+          className={cn(
+            "text-xs font-semibold truncate leading-none transition-colors",
+            isActive ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {provider.name}
+        </p>
+        <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground/75 leading-none">
+          {host}
+        </p>
       </div>
     </div>
   );
