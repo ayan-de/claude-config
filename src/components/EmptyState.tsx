@@ -31,7 +31,7 @@ export function EmptyState({ hasProviders, onNew }: Props) {
               Or create a new one to get started.
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={onNew} className="cursor-pointer">
+          <Button size="sm" variant="default" onClick={onNew} className="cursor-pointer">
             <Plus className="size-3.5" />
             New provider
           </Button>
