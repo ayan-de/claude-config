@@ -87,16 +87,25 @@ pub fn write_settings_atomic(
     })?;
     fs::create_dir_all(parent)?;
 
-    // Acquire lock if file exists; otherwise proceed without one (lock on
-    // a not-yet-existing file has no meaning, but we still hold an empty
-    // File handle to keep lock state consistent).
-    let lock_file = if path.exists() {
-        let f = File::open(path)?;
-        f.lock_exclusive().map_err(|e| AppError::Lock(e.to_string()))?;
-        Some(f)
-    } else {
-        None
+    // Lock a sidecar file, not settings.json itself. On Windows, MoveFileEx
+    // (which backs NamedTempFile::persist) fails with ERROR_ACCESS_DENIED
+    // if the destination is open — including a read/lock handle held by
+    // this same process. Locking a separate file avoids that entirely and
+    // still serialises concurrent writers.
+    let lock_path = {
+        let mut p = path.as_os_str().to_owned();
+        p.push(".lock");
+        PathBuf::from(p)
     };
+    let lock_file = File::options()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| AppError::Lock(e.to_string()))?;
 
     // Backup current contents (best-effort: if read fails or path is missing,
     // we still proceed with the write — the user's settings.json wasn't
@@ -113,7 +122,7 @@ pub fn write_settings_atomic(
         None
     };
 
-    // Atomic write into same directory so rename(2) is atomic on POSIX.
+    // Atomic write into same directory so rename is atomic on all platforms.
     let mut tmp = NamedTempFile::new_in(parent)?;
     tmp.write_all(&json_bytes)?;
     tmp.as_file().sync_all()?;
@@ -121,9 +130,7 @@ pub fn write_settings_atomic(
         return Err(AppError::Io(e.error));
     }
 
-    if let Some(f) = lock_file {
-        let _ = f.unlock();
-    }
+    let _ = lock_file.unlock();
 
     Ok(SettingsBackup { backup_path })
 }
