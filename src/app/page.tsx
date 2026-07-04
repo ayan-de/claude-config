@@ -40,6 +40,7 @@ import { KeyringWarning } from "@/components/KeyringWarning";
 import { ProviderForm } from "@/components/ProviderForm";
 import { ProviderList } from "@/components/ProviderList";
 import { SettingsMenu } from "@/components/SettingsMenu";
+import { TitleBar } from "@/components/TitleBar";
 
 type Mode =
   | { kind: "idle" }
@@ -294,40 +295,44 @@ export default function Page() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b bg-card/30 px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-sm bg-[#f4f3ee]">
-            <Image
-              src="/logo.png"
-              alt="Claude Config"
-              width={32}
-              height={32}
+      <TitleBar
+        left={
+          <div className="flex items-center gap-3">
+            <div className="flex size-8 items-center justify-center rounded-sm bg-[#f4f3ee]">
+              <Image
+                src="/logo.png"
+                alt="Claude Config"
+                width={28}
+                height={28}
+              />
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold leading-none">
+                Claude Config
+              </h1>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Manage Claude Code providers
+              </p>
+            </div>
+          </div>
+        }
+        actions={
+          <div className="flex items-center gap-2 pr-2">
+            <Button size="sm" onClick={handleNew} disabled={!keyringAvailable}>
+              <Plus className="size-3.5" />
+              New provider
+            </Button>
+            <SettingsMenu
+              appDataDir={appDataDir}
+              claudeDir={claudeDir}
+              onRevealAppDir={handleRevealAppDir}
+              onRevealClaudeDir={handleRevealClaudeDir}
+              onExport={handleExport}
+              onImport={handleImport}
             />
           </div>
-          <div>
-            <h1 className="text-sm font-semibold leading-none">
-              Claude Config
-            </h1>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">
-              Manage Claude Code providers
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={handleNew} disabled={!keyringAvailable}>
-            <Plus className="size-3.5" />
-            New provider
-          </Button>
-          <SettingsMenu
-            appDataDir={appDataDir}
-            claudeDir={claudeDir}
-            onRevealAppDir={handleRevealAppDir}
-            onRevealClaudeDir={handleRevealClaudeDir}
-            onExport={handleExport}
-            onImport={handleImport}
-          />
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex min-h-0 flex-1">
         <ProviderList

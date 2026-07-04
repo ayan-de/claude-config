@@ -128,3 +128,12 @@
     @apply font-sans;
   }
 }
+
+@layer utilities {
+  .tauri-drag {
+    -webkit-app-region: drag;
+  }
+  .tauri-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
