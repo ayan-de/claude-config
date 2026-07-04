@@ -36,7 +36,7 @@ export function ProviderCard({
       className={cn(
         "group relative cursor-pointer rounded-xl border bg-card/60 py-2.5 px-3 transition-all duration-200 select-none flex flex-col items-center gap-2",
         isActive
-          ? "border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_12px_rgba(16,185,129,0.03)]"
+          ? "border-[#b1ada1]/40 bg-[#b1ada1]/5 shadow-[0_0_12px_rgba(177,173,161,0.03)]"
           : isSelected
           ? "border-foreground/30 bg-card/90"
           : "border-border hover:border-foreground/20 hover:bg-card/80",
@@ -86,7 +86,7 @@ export function ProviderCard({
           className={cn(
             "w-11 h-6 rounded-full border relative transition-colors duration-150 flex items-center cursor-pointer",
             isActive
-              ? "bg-emerald-500/20 border-emerald-500/30"
+              ? "bg-[#b1ada1]/20 border-[#b1ada1]/30"
               : "bg-muted/40 border-border hover:bg-muted/60",
             isLoading && "opacity-80 cursor-wait"
           )}
@@ -95,12 +95,12 @@ export function ProviderCard({
             className={cn(
               "absolute top-[2.5px] w-[17px] h-[17px] rounded-full transition-all duration-150 flex items-center justify-center",
               isActive
-                ? "left-[22.5px] bg-emerald-400 border border-emerald-500"
+                ? "left-[22.5px] bg-[#b1ada1] border border-[#b1ada1]"
                 : "left-[2.5px] bg-background border border-muted-foreground/30",
             )}
           >
             {isLoading && (
-              <Loader2 className="size-2 animate-spin text-emerald-700" />
+              <Loader2 className="size-2 animate-spin text-[#b1ada1]" />
             )}
           </div>
         </div>

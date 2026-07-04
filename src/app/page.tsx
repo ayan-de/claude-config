@@ -171,8 +171,16 @@ export default function Page() {
                 </p>
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <h3 className="text-sm font-semibold truncate leading-none">
-                      {displayProvider.name}
+                    <h3 className="text-sm font-semibold truncate leading-none flex items-center gap-1.5">
+                      <span>{displayProvider.name}</span>
+                      {!loadingId && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src="/tick.svg"
+                          alt="Active"
+                          className="size-3.5 object-contain shrink-0"
+                        />
+                      )}
                     </h3>
                     <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground/80 leading-none">
                       {(() => {
@@ -189,7 +197,7 @@ export default function Page() {
                       "text-[10px] font-medium px-2.5 py-0.5 rounded-full shrink-0 border select-none transition-all duration-150",
                       loadingId
                         ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
-                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+                        : "bg-[#b1ada1]/10 text-[#b1ada1] border-[#b1ada1]/20",
                     )}
                   >
                     {loadingId ? "switching…" : "connected"}
