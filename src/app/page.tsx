@@ -153,11 +153,9 @@ export default function Page() {
           onNew={handleNew}
         />
 
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-2xl space-y-4">
+        <main className={cn("flex-1 overflow-y-auto p-6", !showForm && "flex flex-col justify-center")}>
+          <div className={cn("mx-auto max-w-2xl w-full", !showForm ? "flex-1 flex flex-col justify-center space-y-6" : "space-y-4")}>
             <KeyringWarning status={keyring} />
-
-
 
             {customEnvKeys && !showForm && (
               <CustomConfigBanner
@@ -167,7 +165,7 @@ export default function Page() {
             )}
 
             {!showForm && displayProvider && (
-              <div className="rounded-xl border bg-card/45 p-5 mb-4">
+              <div className="rounded-xl border bg-card/45 p-5 mb-2">
                 <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3 select-none">
                   Active provider
                 </p>

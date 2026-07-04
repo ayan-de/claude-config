@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -9,19 +9,30 @@ interface Props {
 }
 
 export function EmptyState({ hasProviders, onNew }: Props) {
+  const Logo = (
+    <div className="mx-auto flex justify-center select-none">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/logo2.png"
+        alt="Claude Config"
+        className="size-24 object-contain"
+      />
+    </div>
+  );
+
   if (hasProviders) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="space-y-2 text-center">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted">
-            <KeyRound className="size-5 text-muted-foreground" />
+      <div className="flex h-full items-center justify-center py-6">
+        <div className="space-y-4 text-center">
+          {Logo}
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Select a provider</p>
+            <p className="text-xs text-muted-foreground">
+              Or create a new one to get started.
+            </p>
           </div>
-          <p className="text-sm font-medium">Select a provider</p>
-          <p className="text-xs text-muted-foreground">
-            Or create a new one to get started.
-          </p>
-          <Button size="sm" variant="outline" onClick={onNew} className="mt-3">
-            <Plus />
+          <Button size="sm" variant="outline" onClick={onNew} className="cursor-pointer">
+            <Plus className="size-3.5" />
             New provider
           </Button>
         </div>
@@ -29,19 +40,19 @@ export function EmptyState({ hasProviders, onNew }: Props) {
     );
   }
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="max-w-sm space-y-3 text-center">
-        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted">
-          <KeyRound className="size-5 text-muted-foreground" />
+    <div className="flex h-full items-center justify-center py-6">
+      <div className="max-w-sm space-y-4 text-center">
+        {Logo}
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Add your first provider</p>
+          <p className="text-xs text-muted-foreground leading-normal">
+            Configure a base URL and auth token for the model provider you want
+            to use with Claude Code. You can add as many as you like and switch
+            between them with one click.
+          </p>
         </div>
-        <p className="text-base font-medium">Add your first provider</p>
-        <p className="text-xs text-muted-foreground">
-          Configure a base URL and auth token for the model provider you want
-          to use with Claude Code. You can add as many as you like and switch
-          between them with one click.
-        </p>
-        <Button onClick={onNew}>
-          <Plus />
+        <Button onClick={onNew} className="cursor-pointer">
+          <Plus className="size-3.5" />
           New provider
         </Button>
       </div>
