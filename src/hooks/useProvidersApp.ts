@@ -164,6 +164,10 @@ export function useProvidersApp() {
       if (isEdit) {
         await updateProvider(input);
         toast.success(`Updated “${input.name}”`);
+        // If this is the active provider, reload it into settings.json to sync env changes
+        if (input.id && input.id === active?.id) {
+          await loadProvider(input.id);
+        }
       } else {
         await addProvider(input);
         toast.success(`Created “${input.name}”`);
@@ -175,7 +179,7 @@ export function useProvidersApp() {
     } finally {
       setSaving(false);
     }
-  }, [keyringAvailable, mode.kind, refresh]);
+  }, [keyringAvailable, mode.kind, refresh, active]);
 
   const handleLoad = useCallback(async (id: string) => {
     setLoadingId(id);

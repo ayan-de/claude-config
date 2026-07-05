@@ -414,7 +414,7 @@ function KindForm({
                       id="awsKey"
                       value={f.awsAccessKeyId}
                       onChange={(e) => f.setAwsAccessKeyId(e.target.value)}
-                      placeholder="AKIA..."
+                      placeholder={editing && !f.useAwsProfile ? "Saved — enter to change" : "AKIA..."}
                       className="font-mono text-xs"
                     />
                   </div>
@@ -426,7 +426,7 @@ function KindForm({
                       onChange={f.setAwsSecretAccessKey}
                       show={f.showSecret}
                       setShow={f.setShowSecret}
-                      placeholder="Secret access key"
+                      placeholder={editing && !f.useAwsProfile ? "Saved — enter to change" : "Secret access key"}
                       error={f.secretError}
                     />
                   </div>
