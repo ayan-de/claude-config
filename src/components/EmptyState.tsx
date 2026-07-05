@@ -24,7 +24,7 @@ export function EmptyState({ hasProviders, onNew }: Props) {
 
   if (hasProviders) {
     return (
-      <div className="flex h-full items-center justify-center py-6">
+      <div className="flex h-full items-center justify-center bg-black py-6">
         <div className="space-y-4 text-center">
           <LoopVideo
             src="/animate.mp4"

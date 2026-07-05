@@ -153,7 +153,7 @@ export default function Page() {
           onNew={handleNew}
         />
 
-        <main className={cn("flex-1 overflow-y-auto p-6", !showForm && "flex flex-col justify-center")}>
+        <main className={cn("flex-1 overflow-y-auto p-6 bg-black", !showForm && "flex flex-col justify-center")}>
           <div className={cn("mx-auto max-w-2xl w-full", !showForm ? "flex-1 flex flex-col justify-center space-y-6" : "space-y-4")}>
             <KeyringWarning status={keyring} />
 
