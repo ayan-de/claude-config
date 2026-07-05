@@ -22,6 +22,12 @@ interface ProviderBase {
   defaultHaikuModel?: string;
   apiTimeoutMs?: number;
   disableNonessentialTraffic?: boolean;
+  /**
+   * Inline SVG markup for the provider's logo. Theme-aware: SVGs should
+   * use `currentColor` on primary shapes so the wrapper's CSS `color`
+   * drives the visual. Validated to ≤ 50 KB on save.
+   */
+  logoSvg?: string;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +65,7 @@ interface ProviderInputBase {
   defaultHaikuModel?: string;
   apiTimeoutMs?: number;
   disableNonessentialTraffic?: boolean;
+  logoSvg?: string;
 }
 
 export type ProviderInput =

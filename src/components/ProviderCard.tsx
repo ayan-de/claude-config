@@ -2,6 +2,7 @@
 
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProviderLogo } from "@/components/ProviderLogo";
 import { cn } from "@/lib/utils";
 import { kindLabel, providerSubtitle } from "@/lib/utils-app";
 import type { Provider } from "@/lib/types";
@@ -70,6 +71,13 @@ export function ProviderCard({
           <Trash2 className="size-2.5 text-muted-foreground hover:text-destructive" />
         </Button>
       </div>
+
+      {/* Logo, top-left. Always reserves space so cards stay aligned. */}
+      <ProviderLogo
+        svg={provider.logoSvg}
+        size={22}
+        className="absolute top-1.5 left-1.5 rounded"
+      />
 
       {/* Center: Circuit-breaker Toggle Switch */}
       <div

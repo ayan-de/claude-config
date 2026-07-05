@@ -39,6 +39,7 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-logo: var(--logo-color);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -82,6 +83,11 @@
   --sidebar-border: oklch(0.9401 0 0);
   --sidebar-ring: oklch(0.7731 0 0);
   --radius: 0.5rem;
+  /* Provider logo tint. Light mode uses the copper accent that already
+     drives tick.svg and fallback.svg; dark mode flips to the warm
+     off-white used as the app-logo tile background. SVGs render with
+     `fill="currentColor"` so they pick this up automatically. */
+  --logo-color: #c15f3c;
   --shadow-x: 0;
   --shadow-y: 1px;
   --shadow-blur: 3px;
@@ -120,6 +126,7 @@
   --border: oklch(0.3618 0.0101 106.8928);
   --input: oklch(0.4336 0.0113 100.2195);
   --ring: oklch(0.6724 0.1308 38.7559);
+  --logo-color: #f4f3ee;
   --chart-1: oklch(0.5583 0.1276 42.9956);
   --chart-2: oklch(0.6898 0.1581 290.4107);
   --chart-3: oklch(0.2130 0.0078 95.4245);

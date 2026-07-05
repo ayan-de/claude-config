@@ -1,8 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { deriveProviderName } from "@/lib/utils-app";
+import { deriveProviderName, sanitizeSvg } from "@/lib/utils-app";
+import {
+  CUSTOM_SENTINEL,
+  PRESET_PROVIDERS,
+  fetchPresetLogo,
+  findPresetByBaseUrl,
+} from "@/lib/presetProviders";
 import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
+
+/** Hard cap on user-uploaded SVG size, in characters. Matches the Rust
+ *  validator so the form rejects the upload before the round-trip. */
+const MAX_LOGO_SVG_CHARS = 50 * 1024;
 
 interface UseProviderFormProps {
   editing: Provider | null;
@@ -31,6 +41,21 @@ export function useProviderForm({
   const initialBaseUrl = editing && editing.kind === "custom" ? editing.base_url : "";
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [authToken, setAuthToken] = useState("");
+  // Preset selection: null = nothing picked (create-only), a preset id =
+  // that preset, CUSTOM_SENTINEL = "+ Custom". On edit we lock to a derived
+  // value or CUSTOM_SENTINEL — no preset swap allowed.
+  const initialPresetId = useMemo(() => {
+    if (!editing || editing.kind !== "custom") return null;
+    return findPresetByBaseUrl(editing.base_url)?.id ?? CUSTOM_SENTINEL;
+  }, [editing]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(
+    initialPresetId,
+  );
+  const [logoSvg, setLogoSvg] = useState<string>(
+    editing && editing.kind === "custom" ? editing.logoSvg ?? "" : "",
+  );
+  const [applyingPreset, setApplyingPreset] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
 
   // -- Console --
   const [apiKey, setApiKey] = useState("");
@@ -94,6 +119,16 @@ export function useProviderForm({
     if (editing) return editing.name;
     switch (kind) {
       case "custom":
+        // Preset selection beats hostname derivation: "Z.ai (Zhipu GLM)" is
+        // friendlier than the hostname's "z". The "+ Custom" sentinel and
+        // null both fall through to the hostname.
+        if (
+          selectedPresetId &&
+          selectedPresetId !== CUSTOM_SENTINEL
+        ) {
+          const preset = PRESET_PROVIDERS.find((p) => p.id === selectedPresetId);
+          if (preset) return preset.name;
+        }
         return deriveProviderName(baseUrl);
       case "console":
         return "Anthropic Console";
@@ -109,7 +144,15 @@ export function useProviderForm({
           ? `Subscription (${subscriptionLabel})`
           : "Subscription";
     }
-  }, [editing, kind, baseUrl, awsRegion, vertexProjectId, subscriptionLabel]);
+  }, [
+    editing,
+    kind,
+    baseUrl,
+    awsRegion,
+    vertexProjectId,
+    subscriptionLabel,
+    selectedPresetId,
+  ]);
 
   const urlError =
     kind === "custom" && baseUrl.trim()
@@ -195,6 +238,7 @@ export function useProviderForm({
           kind: "custom",
           base_url: baseUrl.trim(),
           auth_token: authToken.trim() || undefined,
+          logoSvg: logoSvg.trim() || undefined,
         };
         break;
       case "console":
@@ -243,12 +287,90 @@ export function useProviderForm({
     await onSave(payload);
   }
 
+  // Apply a preset: fill baseUrl, override name only if blank, fetch the
+  // bundled SVG. The "+ Custom" sentinel clears the preset state so the
+  // user starts fresh. Network failures degrade silently — baseUrl still
+  // gets filled so the user isn't blocked on a missing SVG.
+  async function applyPreset(id: string) {
+    setLogoError(null);
+    setSelectedPresetId(id);
+
+    if (id === CUSTOM_SENTINEL) {
+      setBaseUrl("");
+      setLogoSvg("");
+      return;
+    }
+
+    const preset = PRESET_PROVIDERS.find((p) => p.id === id);
+    if (!preset) return;
+
+    setBaseUrl(preset.baseUrl);
+    setApplyingPreset(true);
+    try {
+      const svg = await fetchPresetLogo(id);
+      if (svg) {
+        setLogoSvg(svg);
+      } else {
+        // Asset missing — keep the form usable, leave logoSvg empty so
+        // the placeholder dot renders. Don't surface an error toast; the
+        // user can still finish the form and ship without a logo.
+        setLogoSvg("");
+      }
+    } finally {
+      setApplyingPreset(false);
+    }
+  }
+
+  // Read a user-picked SVG file, sanitize, and store. Rejects oversized
+  // files and SVGs that sanitize down to nothing. If a preset is currently
+  // selected, switch to the CUSTOM_SENTINEL — uploading means the user is
+  // diverging from the preset.
+  function handleLogoUpload(file: File | null) {
+    setLogoError(null);
+    if (!file) return;
+    if (file.size > MAX_LOGO_SVG_CHARS) {
+      setLogoError(
+        `SVG is ${(file.size / 1024).toFixed(1)} KB; limit is ${MAX_LOGO_SVG_CHARS / 1024} KB`,
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      const clean = sanitizeSvg(text);
+      if (!clean) {
+        setLogoError("File does not contain valid SVG markup");
+        return;
+      }
+      if (clean.length > MAX_LOGO_SVG_CHARS) {
+        setLogoError(
+          `Sanitized SVG is ${(clean.length / 1024).toFixed(1)} KB; limit is ${MAX_LOGO_SVG_CHARS / 1024} KB`,
+        );
+        return;
+      }
+      setLogoSvg(clean);
+      // Diverging from a preset via upload → drop the preset selection so
+      // the dropdown reverts to "+ Custom" on re-render.
+      if (selectedPresetId && selectedPresetId !== CUSTOM_SENTINEL) {
+        setSelectedPresetId(CUSTOM_SENTINEL);
+      }
+    };
+    reader.onerror = () => setLogoError("Failed to read file");
+    reader.readAsText(file);
+  }
+
   return {
     // Custom
     baseUrl,
     setBaseUrl,
     authToken,
     setAuthToken,
+    selectedPresetId,
+    applyPreset,
+    logoSvg,
+    applyingPreset,
+    logoError,
+    handleLogoUpload,
     // Console
     apiKey,
     setApiKey,

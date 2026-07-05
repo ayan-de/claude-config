@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import type { Provider, ProviderKind } from "./types";
 
 // Token masking helper. Shows first 6 chars + ellipsis + last 4 chars.
@@ -113,4 +114,23 @@ export function providerSubtitle(p: Provider): string {
     case "vertex":
       return [p.vertexProjectId, p.vertexRegion].filter(Boolean).join(" · ") || "Vertex AI";
   }
+}
+
+/**
+ * Sanitize inline SVG markup. Strips `<script>`, `on*` event handlers,
+ * `javascript:` URLs, and external resource references. Returns the empty
+ * string for input that doesn't contain an `<svg>` element.
+ *
+ * Used both on user uploads (before persistence) and at render time as
+ * defense-in-depth for built-in presets.
+ */
+export function sanitizeSvg(svg: string): string {
+  if (!svg || !svg.includes("<svg")) return "";
+  // DOMPurify's default config already blocks scripts and event handlers.
+  // RETURN_TRUSTED_TYPE=false so we can dangerouslySetInnerHTML the result.
+  const clean = DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    RETURN_TRUSTED_TYPE: false,
+  });
+  return typeof clean === "string" ? clean : "";
 }

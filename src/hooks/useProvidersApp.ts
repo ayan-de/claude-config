@@ -26,6 +26,7 @@ import {
   updateProvider,
 } from "@/lib/api";
 import { isWebEnv } from "@/lib/utils-app";
+import { resolveProviderLogo } from "@/lib/presetProviders";
 import type { KeyringStatus, Provider, ProviderInput } from "@/lib/types";
 
 export type AppMode =
@@ -60,8 +61,26 @@ export function useProvidersApp() {
           discoverClaudeDir(),
           getSettingsEnvKeys(),
         ]);
-      setProviders(list);
-      setActive(activeP);
+
+      // Enrich list and active provider with resolved logos if missing
+      const enrichedList = await Promise.all(
+        list.map(async (p) => {
+          if (p.logoSvg) return p;
+          const svg = await resolveProviderLogo(p);
+          return svg ? { ...p, logoSvg: svg } : p;
+        })
+      );
+
+      let enrichedActive = activeP;
+      if (activeP && !activeP.logoSvg) {
+        const svg = await resolveProviderLogo(activeP);
+        if (svg) {
+          enrichedActive = { ...activeP, logoSvg: svg };
+        }
+      }
+
+      setProviders(enrichedList);
+      setActive(enrichedActive);
       setKeyring(krStatus);
       setAppDataDir(appDir);
       setClaudeDir(claudeD);

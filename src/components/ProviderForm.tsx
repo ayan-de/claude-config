@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -9,6 +9,9 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  Lock,
+  Plus,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,8 +20,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ProviderLogo } from "@/components/ProviderLogo";
 import { cn } from "@/lib/utils";
 import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
+import {
+  CUSTOM_SENTINEL,
+  PRESET_PROVIDERS,
+} from "@/lib/presetProviders";
 import { importCurrentSubscription } from "@/lib/api";
 import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
 import { useProviderForm } from "@/hooks/useProviderForm";
@@ -301,48 +316,7 @@ function KindForm({
           )}
 
           {kind === "custom" && (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="baseUrl">Base URL</Label>
-                <Input
-                  id="baseUrl"
-                  value={f.baseUrl}
-                  onChange={(e) => f.setBaseUrl(e.target.value)}
-                  placeholder="https://api.example.com"
-                  className={cn(f.urlError && "border-destructive")}
-                />
-                {f.urlError ? (
-                  <p className="text-xs text-destructive">{f.urlError}</p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground">
-                    Provider name:{" "}
-                    <span className="font-mono font-medium text-foreground">
-                      {f.derivedName || "—"}
-                    </span>
-                  </p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="authToken">Auth token</Label>
-                <SecretInput
-                  id="authToken"
-                  value={f.authToken}
-                  onChange={f.setAuthToken}
-                  show={f.showSecret}
-                  setShow={f.setShowSecret}
-                  placeholder={
-                    editing
-                      ? `${appMaskToken("sk-cp-placeholder-1234abcd")} — enter to change`
-                      : "sk-cp-..."
-                  }
-                  error={f.secretError}
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Sets <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code>.
-                  Stored in OS keyring.
-                </p>
-              </div>
-            </div>
+            <CustomKindFields editing={editing} f={f} />
           )}
 
           {kind === "bedrock" && (
@@ -690,5 +664,199 @@ function SecretInput({
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </>
+  );
+}
+
+interface CustomKindFieldsProps {
+  editing: Provider | null;
+  f: ReturnType<typeof useProviderForm>;
+}
+
+/**
+ * Custom-relay form body: preset dropdown (create-only), logo upload, base
+ * URL, auth token. On edit, the preset is locked to whatever the existing
+ * provider was created as — the user can change name/baseUrl/auth token
+ * but not the template, mirroring how `kind` itself is locked.
+ */
+function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Edit mode: render the locked preset as a static row with the existing
+  // logo (no dropdown, no upload button). Changing template requires a
+  // delete-and-recreate — consistent with how `kind` is locked today.
+  if (editing) {
+    const preset = PRESET_PROVIDERS.find((p) => p.id === f.selectedPresetId);
+    const label = preset?.name ?? "Custom";
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2.5 rounded-lg border bg-muted/20 p-2.5">
+          <ProviderLogo svg={editing.logoSvg} size={28} className="rounded" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium leading-none">{label}</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              <Lock className="inline size-2.5 -translate-y-px" /> Template
+              locked — delete and recreate to change
+            </p>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="baseUrl">Base URL</Label>
+          <Input
+            id="baseUrl"
+            value={f.baseUrl}
+            onChange={(e) => f.setBaseUrl(e.target.value)}
+            placeholder="https://api.example.com"
+            className={cn(f.urlError && "border-destructive")}
+          />
+          {f.urlError && (
+            <p className="text-xs text-destructive">{f.urlError}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="authToken">Auth token</Label>
+          <SecretInput
+            id="authToken"
+            value={f.authToken}
+            onChange={f.setAuthToken}
+            show={f.showSecret}
+            setShow={f.setShowSecret}
+            placeholder={`${appMaskToken("sk-cp-placeholder-1234abcd")} — enter to change`}
+            error={f.secretError}
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Sets <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code>.
+            Stored in OS keyring.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const presetValue =
+    f.selectedPresetId === null ? "__none__" : f.selectedPresetId;
+
+  return (
+    <div className="space-y-3">
+      {/* Preset picker */}
+      <div className="space-y-1.5">
+        <Label htmlFor="preset">Provider template</Label>
+        <Select
+          value={presetValue}
+          onValueChange={(v) => {
+            if (!v || v === "__none__") {
+              f.applyPreset(CUSTOM_SENTINEL);
+              return;
+            }
+            if (v === CUSTOM_SENTINEL) {
+              f.applyPreset(CUSTOM_SENTINEL);
+              return;
+            }
+            void f.applyPreset(v);
+          }}
+        >
+          <SelectTrigger id="preset" className="w-full">
+            <SelectValue placeholder="— Select a preset —" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— Select a preset —</SelectItem>
+            {PRESET_PROVIDERS.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+            <SelectItem value={CUSTOM_SENTINEL}>
+              <span className="inline-flex items-center gap-1.5">
+                <Plus className="size-3" /> Custom
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">
+          Picks the name and base URL. Choose “Custom” to define your own.
+        </p>
+      </div>
+
+      {/* Logo preview + upload */}
+      <div className="flex items-center gap-3 rounded-lg border bg-muted/15 p-2.5">
+        <ProviderLogo svg={f.logoSvg} size={32} className="rounded" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium leading-none">
+            Logo (optional)
+          </p>
+          <p className="mt-1 truncate text-[10px] text-muted-foreground">
+            {f.selectedPresetId && f.selectedPresetId !== CUSTOM_SENTINEL
+              ? "Bundled with preset"
+              : f.logoSvg
+                ? "Custom upload"
+                : "None — upload an SVG"}
+          </p>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".svg,image/svg+xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null;
+            f.handleLogoUpload(file);
+            // Reset so picking the same file twice still triggers onChange.
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 cursor-pointer"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Upload className="size-3" />
+          {f.logoSvg ? "Replace" : "Upload"}
+        </Button>
+      </div>
+      {f.logoError && (
+        <p className="text-xs text-destructive">{f.logoError}</p>
+      )}
+
+      {/* Base URL */}
+      <div className="space-y-1.5">
+        <Label htmlFor="baseUrl">Base URL</Label>
+        <Input
+          id="baseUrl"
+          value={f.baseUrl}
+          onChange={(e) => f.setBaseUrl(e.target.value)}
+          placeholder="https://api.example.com"
+          className={cn(f.urlError && "border-destructive")}
+        />
+        {f.urlError ? (
+          <p className="text-xs text-destructive">{f.urlError}</p>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">
+            Provider name:{" "}
+            <span className="font-mono font-medium text-foreground">
+              {f.derivedName || "—"}
+            </span>
+          </p>
+        )}
+      </div>
+
+      {/* Auth token */}
+      <div className="space-y-1.5">
+        <Label htmlFor="authToken">Auth token</Label>
+        <SecretInput
+          id="authToken"
+          value={f.authToken}
+          onChange={f.setAuthToken}
+          show={f.showSecret}
+          setShow={f.setShowSecret}
+          placeholder="sk-cp-..."
+          error={f.secretError}
+        />
+        <p className="text-[10px] text-muted-foreground">
+          Sets <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code>.
+          Stored in OS keyring.
+        </p>
+      </div>
+    </div>
   );
 }

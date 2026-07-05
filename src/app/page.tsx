@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { KeyringWarning } from "@/components/KeyringWarning";
 import { ProviderForm } from "@/components/ProviderForm";
 import { ProviderList } from "@/components/ProviderList";
+import { ProviderLogo } from "@/components/ProviderLogo";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { TitleBar } from "@/components/TitleBar";
 
@@ -171,21 +172,28 @@ export default function Page() {
                   Active provider
                 </p>
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold truncate leading-none flex items-center gap-1.5">
-                      <span>{displayProvider.name}</span>
-                      {!loadingId && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src="/tick.svg"
-                          alt="Active"
-                          className="size-3.5 object-contain shrink-0"
-                        />
-                      )}
-                    </h3>
-                    <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground/80 leading-none">
-                      {providerSubtitle(displayProvider)}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ProviderLogo
+                      svg={displayProvider.logoSvg}
+                      size={32}
+                      className="rounded"
+                    />
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold truncate leading-none flex items-center gap-1.5">
+                        <span>{displayProvider.name}</span>
+                        {!loadingId && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src="/tick.svg"
+                            alt="Active"
+                            className="size-3.5 object-contain shrink-0"
+                          />
+                        )}
+                      </h3>
+                      <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground/80 leading-none">
+                        {providerSubtitle(displayProvider)}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <span
