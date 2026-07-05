@@ -3,12 +3,15 @@
 //! Schema versioned. On unrecognized future versions we back up the existing
 //! file and start fresh — never silently lose data.
 //!
-//! ## Silent v1 → v2 migration
+//! ## Silent v1 → v2 → v3 migration
 //!
 //! v1 files have no `kind` field on providers (only Custom-relay was
 //! supported). When we read a v1 file, serde defaults the missing `kind` to
 //! `Custom` (see `models::default_kind_custom`), and we bump the in-memory
-//! `schema_version` to 2 so the next save re-serializes as v2.
+//! `schema_version` to 3 so the next save re-serializes as v3.
+//!
+//! v2 files have no `logoSvg` field; serde defaults it to `None`. Same
+//! schema_version bump.
 
 use std::fs;
 use std::path::Path;
@@ -20,7 +23,7 @@ use crate::models::{AppError, AppResult, ProvidersFile};
 
 #[allow(dead_code)] // Documented constant for future external callers.
 pub const PROVIDERS_FILENAME: &str = "providers.json";
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 3;
 
 #[allow(dead_code)] // Reserved for surfacing schema errors back to UI explicitly.
 #[derive(Debug)]
@@ -154,6 +157,7 @@ mod tests {
             default_haiku_model: None,
             api_timeout_ms: None,
             disable_nonessential_traffic: None,
+            logo_svg: None,
             created_at: "2026-07-04T00:00:00Z".into(),
             updated_at: "2026-07-04T00:00:00Z".into(),
         }
@@ -168,20 +172,56 @@ mod tests {
     }
 
     #[test]
-    fn save_then_load_roundtrip_v2() {
+    fn save_then_load_roundtrip_v3() {
         let dir = fresh_dir("data");
         let p = dir.join("providers.json");
+        let mut provider = sample_custom("abc", "test");
+        provider.logo_svg = Some(r#"<svg viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h24v24H0z"/></svg>"#.into());
         let file = ProvidersFile {
-            schema_version: 2,
-            providers: vec![sample_custom("abc", "test")],
+            schema_version: SUPPORTED_SCHEMA_VERSION,
+            providers: vec![provider],
         };
         save_providers_file(&p, &file).unwrap();
         let loaded = load_providers_file(&p).unwrap();
-        assert_eq!(loaded.schema_version, 2);
+        assert_eq!(loaded.schema_version, SUPPORTED_SCHEMA_VERSION);
         assert_eq!(loaded.providers.len(), 1);
         assert_eq!(loaded.providers[0].name, "test");
         assert_eq!(loaded.providers[0].kind, ProviderKind::Custom);
         assert_eq!(loaded.providers[0].model.as_deref(), Some("claude-sonnet-4-6"));
+        // logo_svg survives the round-trip.
+        assert!(loaded.providers[0]
+            .logo_svg
+            .as_deref()
+            .map(|s| s.contains("<svg"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn v2_file_loads_with_logo_svg_none() {
+        // A pre-v3 providers.json file (schema_version: 2, no logoSvg on
+        // providers) must load successfully and surface logo_svg as None.
+        // The schema_version is bumped in-memory so the next save is v3.
+        let dir = fresh_dir("data");
+        let p = dir.join("providers.json");
+        let v2_json = r#"{
+            "schema_version": 2,
+            "providers": [
+                {
+                    "id": "7ad6c1f5",
+                    "name": "minimax",
+                    "kind": "custom",
+                    "base_url": "https://api.minimax.io/anthropic",
+                    "model": "minimax",
+                    "created_at": "2026-07-04T17:07:06Z",
+                    "updated_at": "2026-07-04T17:07:06Z"
+                }
+            ]
+        }"#;
+        fs::write(&p, v2_json).unwrap();
+        let loaded = load_providers_file(&p).unwrap();
+        assert_eq!(loaded.schema_version, SUPPORTED_SCHEMA_VERSION);
+        assert_eq!(loaded.providers.len(), 1);
+        assert!(loaded.providers[0].logo_svg.is_none());
     }
 
     #[test]
@@ -236,15 +276,18 @@ mod tests {
         }"#;
         fs::write(&p, v1_json).unwrap();
         let loaded = load_providers_file(&p).unwrap();
-        // Round-trip: save the loaded (now v2) file, re-read, should be clean v2.
+        // Round-trip: save the loaded (now v3) file, re-read, should be clean v3.
         save_providers_file(&p, &loaded).unwrap();
         let reloaded = load_providers_file(&p).unwrap();
-        assert_eq!(reloaded.schema_version, 2);
+        assert_eq!(reloaded.schema_version, SUPPORTED_SCHEMA_VERSION);
         assert_eq!(reloaded.providers[0].kind, ProviderKind::Custom);
         // Verify the raw JSON now contains the kind field.
         let raw = fs::read_to_string(&p).unwrap();
         assert!(raw.contains("\"kind\": \"custom\""), "raw json: {raw}");
-        assert!(raw.contains("\"schema_version\": 2"), "raw json: {raw}");
+        assert!(
+            raw.contains(&format!("\"schema_version\": {SUPPORTED_SCHEMA_VERSION}")),
+            "raw json: {raw}"
+        );
     }
 
     #[test]

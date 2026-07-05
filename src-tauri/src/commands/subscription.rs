@@ -74,6 +74,7 @@ pub fn import_current_subscription_cmd(
         default_haiku_model: None,
         api_timeout_ms: None,
         disable_nonessential_traffic: None,
+        logo_svg: None,
         created_at: now.clone(),
         updated_at: now,
     };

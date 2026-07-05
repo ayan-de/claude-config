@@ -216,6 +216,7 @@ pub fn save_current_as_provider_cmd(
                 "0" | "false" => Some(false),
                 _ => None,
             }),
+        logo_svg: None,
         created_at: now.clone(),
         updated_at: now,
     };

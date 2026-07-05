@@ -143,6 +143,16 @@ fn validate_input(input: &ProviderInput, creating: bool) -> AppResult<()> {
             ));
         }
     }
+    if let Some(svg) = input.logo_svg.as_deref() {
+        // SVGs are stored inline in providers.json. Cap size to keep the file
+        // small — the renderer already rejects oversized uploads at 50 KB,
+        // but re-validate here in case a payload comes from elsewhere.
+        if svg.len() > 50 * 1024 {
+            return Err(AppError::Validation(
+                "logo_svg exceeds 50 KB limit".into(),
+            ));
+        }
+    }
 
     match input.kind {
         ProviderKind::Subscription => {
@@ -310,6 +320,7 @@ fn provider_from_input(
         default_haiku_model: non_empty(input.default_haiku_model.clone()),
         api_timeout_ms: input.api_timeout_ms,
         disable_nonessential_traffic: input.disable_nonessential_traffic,
+        logo_svg: non_empty(input.logo_svg.clone()),
         created_at,
         updated_at,
     }

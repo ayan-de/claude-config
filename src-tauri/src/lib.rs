@@ -176,6 +176,7 @@ fn try_import_custom(app_state: &AppState, now: &str) -> Option<Provider> {
                 "0" | "false" => Some(false),
                 _ => None,
             }),
+        logo_svg: None,
         created_at: now.to_string(),
         updated_at: now.to_string(),
     };
@@ -228,6 +229,7 @@ fn try_import_subscription(app_state: &AppState, now: &str) -> Option<Provider> 
         default_haiku_model: None,
         api_timeout_ms: None,
         disable_nonessential_traffic: None,
+        logo_svg: None,
         created_at: now.to_string(),
         updated_at: now.to_string(),
     };

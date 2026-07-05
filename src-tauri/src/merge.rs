@@ -283,6 +283,7 @@ mod tests {
             default_haiku_model: None,
             api_timeout_ms: None,
             disable_nonessential_traffic: None,
+            logo_svg: None,
             created_at: "2026-07-04T00:00:00Z".into(),
             updated_at: "2026-07-04T00:00:00Z".into(),
         }

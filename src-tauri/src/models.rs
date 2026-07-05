@@ -149,6 +149,14 @@ pub struct Provider {
     )]
     pub disable_nonessential_traffic: Option<bool>,
 
+    /// Inline SVG markup for the provider's logo. Stored as a string (no
+    /// base64) so it survives export/import as part of `providers.json`.
+    /// Theme-aware: SVGs should use `currentColor` on their primary shapes —
+    /// the renderer wraps the SVG in an element with `color: var(--muted-foreground)`.
+    /// Validated to ≤ 50 KB on write to keep `providers.json` small.
+    #[serde(rename = "logoSvg", skip_serializing_if = "Option::is_none", default)]
+    pub logo_svg: Option<String>,
+
     pub created_at: String,
     pub updated_at: String,
 }
@@ -219,9 +227,12 @@ pub struct ProviderInput {
     pub api_timeout_ms: Option<u64>,
     #[serde(default)]
     pub disable_nonessential_traffic: Option<bool>,
-}
 
-/// Keyring payload — one entry per provider, serialized as JSON. The variant
+    /// Inline SVG markup for the provider's logo. Omitted from payloads when
+    /// the user hasn't set one — see `Provider::logo_svg` for storage details.
+    #[serde(default)]
+    pub logo_svg: Option<String>,
+}
 /// tag must match the provider's `kind`; a mismatch indicates data corruption
 /// or a partial write, and should be surfaced as an internal error.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -264,7 +275,7 @@ pub struct ProvidersFile {
 impl Default for ProvidersFile {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             providers: Vec::new(),
         }
     }
@@ -369,6 +380,7 @@ mod tests {
             default_haiku_model: None,
             api_timeout_ms: Some(60_000),
             disable_nonessential_traffic: Some(true),
+            logo_svg: None,
             created_at: "2026-07-04T00:00:00Z".into(),
             updated_at: "2026-07-04T00:00:00Z".into(),
         }
@@ -388,6 +400,17 @@ mod tests {
         assert!(!json.contains("defaultOpusModel"));
         assert!(!json.contains("awsRegion"));
         assert!(!json.contains("vertexProjectId"));
+        assert!(!json.contains("logoSvg"));
+    }
+
+    #[test]
+    fn provider_logo_svg_round_trips() {
+        let mut p = sample_custom();
+        p.logo_svg = Some(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h24v24H0z"/></svg>"#.into());
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"logoSvg\":\"<svg"));
+        let back: Provider = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.logo_svg, p.logo_svg);
     }
 
     #[test]
