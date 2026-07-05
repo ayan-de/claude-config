@@ -67,6 +67,19 @@ export const previewProviderEnv = (id: string) =>
 export const getSettingsEnvKeys = () =>
   call<string[]>("get_settings_env_keys_cmd");
 
+// ---------- subscription ----------
+
+/**
+ * Snapshot the current `claude /login` OAuth session (from
+ * `~/.claude/.credentials.json`) as a saved Subscription provider.
+ *
+ * `label` is optional — used to disambiguate multiple subscription profiles
+ * (e.g. "Work Max", "Personal Pro"). When omitted, the display name is
+ * derived from the email in the OAuth blob when available.
+ */
+export const importCurrentSubscription = (label?: string) =>
+  call<Provider>("import_current_subscription_cmd", { label: label ?? null });
+
 // ---------- transfer ----------
 
 export const exportProviders = (

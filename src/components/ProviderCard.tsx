@@ -3,6 +3,7 @@
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { kindLabel, providerSubtitle } from "@/lib/utils-app";
 import type { Provider } from "@/lib/types";
 
 interface Props {
@@ -24,12 +25,8 @@ export function ProviderCard({
   onLoad,
   onDelete,
 }: Props) {
-  let host = "";
-  try {
-    host = new URL(provider.base_url).host;
-  } catch {
-    host = provider.base_url;
-  }
+  const subtitle = providerSubtitle(provider);
+  const badge = kindLabel(provider.kind);
 
   return (
     <div
@@ -117,7 +114,10 @@ export function ProviderCard({
           {provider.name}
         </p>
         <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground/75 leading-none">
-          {host}
+          {subtitle}
+        </p>
+        <p className="mt-1 inline-block rounded-full border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-muted-foreground/80 leading-none">
+          {badge}
         </p>
       </div>
     </div>

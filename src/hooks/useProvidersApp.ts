@@ -192,6 +192,17 @@ export function useProvidersApp() {
     }
   }, [deleteTarget, refresh]);
 
+  const handleSubscriptionImported = useCallback(
+    async (p: Provider) => {
+      // Snapshot was written by the backend; refresh so the sidebar picks it
+      // up, then switch to editing the new provider so the user can add
+      // model overrides / label tweaks and hit Save.
+      await refresh();
+      setMode({ kind: "editing", provider: p });
+    },
+    [refresh],
+  );
+
   const handleSaveCurrentAs = useCallback(async () => {
     const name = window.prompt("Name for this provider:");
     if (!name) return;
@@ -303,6 +314,7 @@ export function useProvidersApp() {
     handleSave,
     handleLoad,
     handleDeleteConfirm,
+    handleSubscriptionImported,
     handleSaveCurrentAs,
     handleRevealAppDir,
     handleRevealClaudeDir,

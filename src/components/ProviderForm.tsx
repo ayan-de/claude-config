@@ -1,33 +1,84 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+} from "lucide-react";
+import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { maskToken as appMaskToken } from "@/lib/utils-app";
-import type { Provider, ProviderInput } from "@/lib/types";
+import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
+import { importCurrentSubscription } from "@/lib/api";
+import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
 import { useProviderForm } from "@/hooks/useProviderForm";
 
 interface Props {
-  /** The provider being edited; null when creating new. */
   editing: Provider | null;
-  /** True if the form has unsaved changes (for Cancel confirm). */
   onCancel: () => void;
-  /** Called with the derived input — name is set automatically from baseUrl. */
   onSave: (input: ProviderInput) => Promise<void>;
+  /** Called when the user opts to import a Subscription via
+   *  `claude /login` snapshot. */
+  onSubscriptionImported: (p: Provider) => void;
   isSaving: boolean;
 }
+
+const KIND_OPTIONS: {
+  kind: ProviderKind;
+  title: string;
+  description: string;
+}[] = [
+  {
+    kind: "subscription",
+    title: "Subscription",
+    description: "Claude account: Pro, Max, Team, or Enterprise",
+  },
+  {
+    kind: "console",
+    title: "Anthropic Console",
+    description: "API key billing via console.anthropic.com",
+  },
+  {
+    kind: "custom",
+    title: "Custom relay",
+    description: "Third-party proxy exposing the Anthropic API",
+  },
+  {
+    kind: "bedrock",
+    title: "Amazon Bedrock",
+    description: "AWS Bedrock via CLAUDE_CODE_USE_BEDROCK",
+  },
+  {
+    kind: "vertex",
+    title: "Google Vertex AI",
+    description: "Vertex AI via CLAUDE_CODE_USE_VERTEX",
+  },
+];
 
 export function ProviderForm({
   editing,
   onCancel,
   onSave,
+  onSubscriptionImported,
   isSaving,
 }: Props) {
+  // When editing, the kind is locked to the existing provider's kind (the
+  // backend rejects kind changes on update). Otherwise we start on step 1
+  // (kind picker) with no selection.
+  const [selectedKind, setSelectedKind] = useState<ProviderKind | null>(
+    editing?.kind ?? null,
+  );
+  const [importing, setImporting] = useState(false);
   const [modelsExpanded, setModelsExpanded] = useState(() => {
     if (!editing) return false;
     return !!(
@@ -43,111 +94,389 @@ export function ProviderForm({
     return !!(editing.apiTimeoutMs || editing.disableNonessentialTraffic);
   });
 
-  const {
-    baseUrl,
-    setBaseUrl,
-    authToken,
-    setAuthToken,
-    model,
-    setModel,
-    smallFastModel,
-    setSmallFastModel,
-    defaultSonnetModel,
-    setDefaultSonnetModel,
-    defaultOpusModel,
-    setDefaultOpusModel,
-    defaultHaikuModel,
-    setDefaultHaikuModel,
-    apiTimeoutMs,
-    setApiTimeoutMs,
-    disableNonessentialTraffic,
-    setDisableNonessentialTraffic,
-    showToken,
-    setShowToken,
-    derivedName,
-    urlError,
-    tokenError,
-    timeoutError,
-    canSubmit,
-    handleSubmit,
-  } = useProviderForm({ editing, onSave, isSaving });
+  // Kind picker (step 1)
+  if (!selectedKind) {
+    return (
+      <Card className="border-border/60">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">New Provider</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            How do you want Claude Code to authenticate?
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {KIND_OPTIONS.map((opt) => (
+              <button
+                key={opt.kind}
+                type="button"
+                onClick={() => setSelectedKind(opt.kind)}
+                className="group flex w-full items-center justify-between gap-3 rounded-lg border bg-card/60 p-3 text-left transition-colors hover:border-foreground/30 hover:bg-card/90 cursor-pointer"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">{opt.title}</span>
+                    <span className="rounded-full border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/80">
+                      {kindLabel(opt.kind)}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {opt.description}
+                  </p>
+                </div>
+                <ChevronRight className="size-4 text-muted-foreground group-hover:text-foreground shrink-0" />
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-end pt-4">
+            <Button type="button" variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <KindForm
+      editing={editing}
+      kind={selectedKind}
+      importing={importing}
+      setImporting={setImporting}
+      onSubscriptionImported={onSubscriptionImported}
+      modelsExpanded={modelsExpanded}
+      setModelsExpanded={setModelsExpanded}
+      advancedExpanded={advancedExpanded}
+      setAdvancedExpanded={setAdvancedExpanded}
+      onBack={editing ? null : () => setSelectedKind(null)}
+      onCancel={onCancel}
+      onSave={onSave}
+      isSaving={isSaving}
+    />
+  );
+}
+
+interface KindFormProps {
+  editing: Provider | null;
+  kind: ProviderKind;
+  importing: boolean;
+  setImporting: (b: boolean) => void;
+  onSubscriptionImported: (p: Provider) => void;
+  modelsExpanded: boolean;
+  setModelsExpanded: (b: boolean) => void;
+  advancedExpanded: boolean;
+  setAdvancedExpanded: (b: boolean) => void;
+  onBack: (() => void) | null;
+  onCancel: () => void;
+  onSave: (input: ProviderInput) => Promise<void>;
+  isSaving: boolean;
+}
+
+function KindForm({
+  editing,
+  kind,
+  importing,
+  setImporting,
+  onSubscriptionImported,
+  modelsExpanded,
+  setModelsExpanded,
+  advancedExpanded,
+  setAdvancedExpanded,
+  onBack,
+  onCancel,
+  onSave,
+  isSaving,
+}: KindFormProps) {
+  const f = useProviderForm({ editing, kind, onSave, isSaving });
+
+  async function handleImportSubscription() {
+    setImporting(true);
+    try {
+      const p = await importCurrentSubscription(
+        f.subscriptionLabel.trim() || undefined,
+      );
+      toast.success(`Imported “${p.name}”`);
+      onSubscriptionImported(p);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  }
 
   return (
     <Card className="border-border/60">
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">
-          {editing ? `Edit “${editing.name}”` : "New Provider"}
-        </CardTitle>
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+              aria-label="Back"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+          )}
+          <CardTitle className="text-base">
+            {editing ? `Edit “${editing.name}”` : `New ${kindLabel(kind)} provider`}
+          </CardTitle>
+        </div>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Required fields */}
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="baseUrl">Base URL</Label>
-              <Input
-                id="baseUrl"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.example.com"
-                className={cn(urlError && "border-destructive")}
-              />
-              {urlError ? (
-                <p className="text-xs text-destructive">{urlError}</p>
-              ) : (
-                <p className="text-[10px] text-muted-foreground">
-                  Provider name:{" "}
-                  <span className="font-mono font-medium text-foreground">
-                    {derivedName || "—"}
-                  </span>
-                </p>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="authToken">Auth Token</Label>
-              <div className="relative">
+        <form onSubmit={f.handleSubmit} className="space-y-5">
+          {/* ---------- Kind-specific fields ---------- */}
+
+          {kind === "subscription" && !editing && (
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <p className="text-xs text-muted-foreground">
+                Run <code className="font-mono">claude /login</code> in a
+                terminal to complete OAuth, then import the current session
+                below. Add a label to distinguish this from other subscription
+                accounts.
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="subLabel" className="text-xs">
+                  Label (optional)
+                </Label>
                 <Input
+                  id="subLabel"
+                  value={f.subscriptionLabel}
+                  onChange={(e) => f.setSubscriptionLabel(e.target.value)}
+                  placeholder="Personal Max, Work Pro, …"
+                />
+              </div>
+              <Button
+                type="button"
+                onClick={handleImportSubscription}
+                disabled={importing}
+                variant="secondary"
+                className="w-full"
+              >
+                {importing ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <KeyRound className="size-3.5" />
+                )}
+                Import current claude /login session
+              </Button>
+            </div>
+          )}
+
+          {kind === "subscription" && editing && (
+            <div className="space-y-1.5">
+              <Label htmlFor="subLabel" className="text-xs">
+                Label
+              </Label>
+              <Input
+                id="subLabel"
+                value={f.subscriptionLabel}
+                onChange={(e) => f.setSubscriptionLabel(e.target.value)}
+              />
+            </div>
+          )}
+
+          {kind === "console" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="apiKey">API key</Label>
+              <SecretInput
+                id="apiKey"
+                value={f.apiKey}
+                onChange={f.setApiKey}
+                show={f.showSecret}
+                setShow={f.setShowSecret}
+                placeholder={
+                  editing
+                    ? `${appMaskToken("sk-ant-placeholder-1234abcd")} — enter to change`
+                    : "sk-ant-..."
+                }
+                error={f.secretError}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Sets <code className="font-mono">ANTHROPIC_API_KEY</code>.
+                Stored in OS keyring.
+              </p>
+            </div>
+          )}
+
+          {kind === "custom" && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="baseUrl">Base URL</Label>
+                <Input
+                  id="baseUrl"
+                  value={f.baseUrl}
+                  onChange={(e) => f.setBaseUrl(e.target.value)}
+                  placeholder="https://api.example.com"
+                  className={cn(f.urlError && "border-destructive")}
+                />
+                {f.urlError ? (
+                  <p className="text-xs text-destructive">{f.urlError}</p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">
+                    Provider name:{" "}
+                    <span className="font-mono font-medium text-foreground">
+                      {f.derivedName || "—"}
+                    </span>
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="authToken">Auth token</Label>
+                <SecretInput
                   id="authToken"
-                  type={showToken ? "text" : "password"}
-                  value={authToken}
-                  onChange={(e) => setAuthToken(e.target.value)}
+                  value={f.authToken}
+                  onChange={f.setAuthToken}
+                  show={f.showSecret}
+                  setShow={f.setShowSecret}
                   placeholder={
                     editing
                       ? `${appMaskToken("sk-cp-placeholder-1234abcd")} — enter to change`
                       : "sk-cp-..."
                   }
-                  className={cn(
-                    "pr-10 font-mono",
-                    tokenError && "border-destructive",
-                  )}
-                  autoComplete="off"
-                  spellCheck={false}
+                  error={f.secretError}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowToken((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
-                  aria-label={showToken ? "Hide token" : "Show token"}
-                >
-                  {showToken ? (
-                    <EyeOff className="size-3.5" />
-                  ) : (
-                    <Eye className="size-3.5" />
-                  )}
-                </button>
+                <p className="text-[10px] text-muted-foreground">
+                  Sets <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code>.
+                  Stored in OS keyring.
+                </p>
               </div>
-              {tokenError && (
-                <p className="text-xs text-destructive">{tokenError}</p>
-              )}
-              <p className="text-[10px] text-muted-foreground">
-                Stored in OS keyring. Never written to disk in plaintext.
-              </p>
             </div>
-          </div>
+          )}
+
+          {kind === "bedrock" && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="awsRegion">AWS region</Label>
+                <Input
+                  id="awsRegion"
+                  value={f.awsRegion}
+                  onChange={(e) => f.setAwsRegion(e.target.value)}
+                  placeholder="us-east-1"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="flex gap-2 rounded-md border p-2 text-xs">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={f.useAwsProfile}
+                    onChange={() => f.setUseAwsProfile(true)}
+                    className="size-3.5 accent-foreground"
+                  />
+                  Use AWS profile
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={!f.useAwsProfile}
+                    onChange={() => f.setUseAwsProfile(false)}
+                    className="size-3.5 accent-foreground"
+                  />
+                  Static credentials
+                </label>
+              </div>
+              {f.useAwsProfile ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="awsProfile">Profile name</Label>
+                  <Input
+                    id="awsProfile"
+                    value={f.awsProfile}
+                    onChange={(e) => f.setAwsProfile(e.target.value)}
+                    placeholder="default"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Reads credentials from{" "}
+                    <code className="font-mono">~/.aws/credentials</code>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="awsKey">Access key ID</Label>
+                    <Input
+                      id="awsKey"
+                      value={f.awsAccessKeyId}
+                      onChange={(e) => f.setAwsAccessKeyId(e.target.value)}
+                      placeholder="AKIA..."
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="awsSecret">Secret access key</Label>
+                    <SecretInput
+                      id="awsSecret"
+                      value={f.awsSecretAccessKey}
+                      onChange={f.setAwsSecretAccessKey}
+                      show={f.showSecret}
+                      setShow={f.setShowSecret}
+                      placeholder="Secret access key"
+                      error={f.secretError}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="awsSess" className="text-xs">
+                      Session token (optional)
+                    </Label>
+                    <Input
+                      id="awsSess"
+                      value={f.awsSessionToken}
+                      onChange={(e) => f.setAwsSessionToken(e.target.value)}
+                      placeholder="STS session token, if using SSO/AssumeRole"
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {kind === "vertex" && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="vertexProject">Project ID</Label>
+                <Input
+                  id="vertexProject"
+                  value={f.vertexProjectId}
+                  onChange={(e) => f.setVertexProjectId(e.target.value)}
+                  placeholder="my-gcp-project"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="vertexRegion">Region</Label>
+                <Input
+                  id="vertexRegion"
+                  value={f.vertexRegion}
+                  onChange={(e) => f.setVertexRegion(e.target.value)}
+                  placeholder="us-central1"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="gcpCreds" className="text-xs">
+                  Service account key path (optional)
+                </Label>
+                <Input
+                  id="gcpCreds"
+                  value={f.googleApplicationCredentials}
+                  onChange={(e) =>
+                    f.setGoogleApplicationCredentials(e.target.value)
+                  }
+                  placeholder="/path/to/service-account.json"
+                  className="font-mono text-xs"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Leave blank to use gcloud Application Default Credentials.
+                </p>
+              </div>
+            </div>
+          )}
 
           <Separator />
 
-          {/* Models */}
+          {/* ---------- Model overrides (all kinds) ---------- */}
           <div className="space-y-3">
             <button
               type="button"
@@ -177,8 +506,8 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    value={f.model}
+                    onChange={(e) => f.setModel(e.target.value)}
                     placeholder="claude-sonnet-4-6"
                     className="font-mono text-xs"
                   />
@@ -189,8 +518,8 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="smallFastModel"
-                    value={smallFastModel}
-                    onChange={(e) => setSmallFastModel(e.target.value)}
+                    value={f.smallFastModel}
+                    onChange={(e) => f.setSmallFastModel(e.target.value)}
                     placeholder="claude-haiku-4-5"
                     className="font-mono text-xs"
                   />
@@ -201,8 +530,8 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="defaultSonnetModel"
-                    value={defaultSonnetModel}
-                    onChange={(e) => setDefaultSonnetModel(e.target.value)}
+                    value={f.defaultSonnetModel}
+                    onChange={(e) => f.setDefaultSonnetModel(e.target.value)}
                     className="font-mono text-xs"
                   />
                 </div>
@@ -212,8 +541,8 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="defaultOpusModel"
-                    value={defaultOpusModel}
-                    onChange={(e) => setDefaultOpusModel(e.target.value)}
+                    value={f.defaultOpusModel}
+                    onChange={(e) => f.setDefaultOpusModel(e.target.value)}
                     className="font-mono text-xs"
                   />
                 </div>
@@ -223,8 +552,8 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="defaultHaikuModel"
-                    value={defaultHaikuModel}
-                    onChange={(e) => setDefaultHaikuModel(e.target.value)}
+                    value={f.defaultHaikuModel}
+                    onChange={(e) => f.setDefaultHaikuModel(e.target.value)}
                     className="font-mono text-xs"
                   />
                 </div>
@@ -234,7 +563,7 @@ export function ProviderForm({
 
           <Separator />
 
-          {/* Advanced */}
+          {/* ---------- Advanced (all kinds) ---------- */}
           <div className="space-y-3">
             <button
               type="button"
@@ -261,22 +590,25 @@ export function ProviderForm({
                   </Label>
                   <Input
                     id="apiTimeoutMs"
-                    value={apiTimeoutMs}
-                    onChange={(e) => setApiTimeoutMs(e.target.value)}
+                    value={f.apiTimeoutMs}
+                    onChange={(e) => f.setApiTimeoutMs(e.target.value)}
                     placeholder="3000000"
-                    className={cn("font-mono text-xs", timeoutError && "border-destructive")}
+                    className={cn(
+                      "font-mono text-xs",
+                      f.timeoutError && "border-destructive",
+                    )}
                     inputMode="numeric"
                   />
-                  {timeoutError && (
-                    <p className="text-xs text-destructive">{timeoutError}</p>
+                  {f.timeoutError && (
+                    <p className="text-xs text-destructive">{f.timeoutError}</p>
                   )}
                 </div>
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-muted/20 p-2.5">
                   <input
                     type="checkbox"
-                    checked={disableNonessentialTraffic}
+                    checked={f.disableNonessentialTraffic}
                     onChange={(e) =>
-                      setDisableNonessentialTraffic(e.target.checked)
+                      f.setDisableNonessentialTraffic(e.target.checked)
                     }
                     className="mt-0.5 size-3.5 accent-foreground"
                   />
@@ -285,7 +617,10 @@ export function ProviderForm({
                       Block non-essential traffic
                     </span>
                     <p className="text-[10px] text-muted-foreground">
-                      Sets CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                      Sets{" "}
+                      <code className="font-mono">
+                        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                      </code>
                     </p>
                   </div>
                 </label>
@@ -297,13 +632,63 @@ export function ProviderForm({
             <Button type="button" variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {isSaving && <Loader2 className="size-3.5 animate-spin" />}
-              {editing ? "Save changes" : "Create provider"}
-            </Button>
+            {/* Subscription create is completed via the import button above;
+                only surface the primary submit for other kinds or when editing. */}
+            {!(kind === "subscription" && !editing) && (
+              <Button type="submit" disabled={!f.canSubmit}>
+                {isSaving && <Loader2 className="size-3.5 animate-spin" />}
+                {editing ? "Save changes" : "Create provider"}
+              </Button>
+            )}
           </div>
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+interface SecretInputProps {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  setShow: (b: boolean) => void;
+  placeholder?: string;
+  error: string | null;
+}
+
+function SecretInput({
+  id,
+  value,
+  onChange,
+  show,
+  setShow,
+  placeholder,
+  error,
+}: SecretInputProps) {
+  return (
+    <>
+      <div className="relative">
+        <Input
+          id={id}
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={cn("pr-10 font-mono", error && "border-destructive")}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={() => setShow(!show)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+          aria-label={show ? "Hide secret" : "Show secret"}
+        >
+          {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        </button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </>
   );
 }

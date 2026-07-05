@@ -4,7 +4,7 @@
 import { PanelLeftOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { isWebEnv } from "@/lib/utils-app";
+import { isWebEnv, kindLabel, providerSubtitle } from "@/lib/utils-app";
 import { useProvidersApp } from "@/hooks/useProvidersApp";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +42,7 @@ export default function Page() {
     handleSave,
     handleLoad,
     handleDeleteConfirm,
+    handleSubscriptionImported,
     handleSaveCurrentAs,
     handleRevealAppDir,
     handleRevealClaudeDir,
@@ -183,25 +184,24 @@ export default function Page() {
                       )}
                     </h3>
                     <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground/80 leading-none">
-                      {(() => {
-                        try {
-                          return new URL(displayProvider.base_url).host;
-                        } catch {
-                          return displayProvider.base_url;
-                        }
-                      })()}
+                      {providerSubtitle(displayProvider)}
                     </p>
                   </div>
-                  <span
-                    className={cn(
-                      "text-[10px] font-medium px-2.5 py-0.5 rounded-full shrink-0 border select-none transition-all duration-150",
-                      loadingId
-                        ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
-                        : "bg-primary/10 text-primary border-primary/20",
-                    )}
-                  >
-                    {loadingId ? "switching…" : "connected"}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span
+                      className={cn(
+                        "text-[10px] font-medium px-2.5 py-0.5 rounded-full border select-none transition-all duration-150",
+                        loadingId
+                          ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
+                          : "bg-primary/10 text-primary border-primary/20",
+                      )}
+                    >
+                      {loadingId ? "switching…" : "connected"}
+                    </span>
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/70 select-none">
+                      {kindLabel(displayProvider.kind)}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -211,6 +211,7 @@ export default function Page() {
                 editing={editingProvider}
                 onCancel={handleCancel}
                 onSave={handleSave}
+                onSubscriptionImported={handleSubscriptionImported}
                 isSaving={saving}
               />
             ) : (

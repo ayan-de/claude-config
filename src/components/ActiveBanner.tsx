@@ -3,14 +3,10 @@
 import { CheckCircle2 } from "lucide-react";
 import type { Provider } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
+import { providerSubtitle } from "@/lib/utils-app";
 
 export function ActiveBanner({ provider }: { provider: Provider }) {
-  let host = provider.base_url;
-  try {
-    host = new URL(provider.base_url).host;
-  } catch {
-    // Invalid URL — fall back to the raw string. Doesn't crash the UI.
-  }
+  const subtitle = providerSubtitle(provider);
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5">
       <div className="flex items-center gap-2.5">
@@ -20,7 +16,7 @@ export function ActiveBanner({ provider }: { provider: Provider }) {
         </span>
         <span className="font-medium text-foreground">{provider.name}</span>
         <Badge variant="secondary" className="font-mono text-[10px]">
-          {host}
+          {subtitle}
         </Badge>
       </div>
       <span className="text-[10px] text-muted-foreground/70">

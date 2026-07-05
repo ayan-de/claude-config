@@ -1,3 +1,5 @@
+import type { Provider, ProviderKind } from "./types";
+
 // Token masking helper. Shows first 6 chars + ellipsis + last 4 chars.
 // Never returns the full token to the UI — Tauri commands deliberately
 // omit it from Provider structs.
@@ -69,4 +71,46 @@ export function deriveProviderName(baseUrl: string): string {
     }
   }
   return host;
+}
+
+/**
+ * Short label for a provider kind — used in card badges and the wizard.
+ */
+export function kindLabel(kind: ProviderKind): string {
+  switch (kind) {
+    case "subscription":
+      return "Subscription";
+    case "console":
+      return "Console";
+    case "custom":
+      return "Custom";
+    case "bedrock":
+      return "Bedrock";
+    case "vertex":
+      return "Vertex";
+  }
+}
+
+/**
+ * Short subtitle for a provider — the second line under its name in the
+ * sidebar card and active-provider panel. Different kinds surface different
+ * information (host, region, "OAuth", etc.).
+ */
+export function providerSubtitle(p: Provider): string {
+  switch (p.kind) {
+    case "subscription":
+      return p.subscriptionLabel ?? "OAuth session";
+    case "console":
+      return "console.anthropic.com";
+    case "custom":
+      try {
+        return new URL(p.base_url).host;
+      } catch {
+        return p.base_url;
+      }
+    case "bedrock":
+      return p.awsRegion ?? "AWS Bedrock";
+    case "vertex":
+      return [p.vertexProjectId, p.vertexRegion].filter(Boolean).join(" · ") || "Vertex AI";
+  }
 }
