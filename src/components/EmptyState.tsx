@@ -1,7 +1,9 @@
 "use client";
 
+import * as React from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoopVideo } from "@/components/LoopVideo";
 
 interface Props {
   hasProviders: boolean;
@@ -24,9 +26,13 @@ export function EmptyState({ hasProviders, onNew }: Props) {
     return (
       <div className="flex h-full items-center justify-center py-6">
         <div className="space-y-4 text-center">
-          {Logo}
+          <LoopVideo
+            src="/animate.mp4"
+            fallbackSrc="/logo2.png"
+            alt="Claude Config"
+            className="mx-auto h-32 w-auto"
+          />
           <div className="space-y-1">
-            <p className="text-sm font-semibold">Select a provider</p>
             <p className="text-xs text-muted-foreground">
               Or create a new one to get started.
             </p>
