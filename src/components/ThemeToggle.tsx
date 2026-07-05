@@ -46,13 +46,13 @@ export function ThemeToggle() {
         variant="outline"
         size="icon"
         onClick={toggleTheme}
-        className="h-10 w-10 rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-card hover:border-[#c15f3c]/40 focus-visible:ring-2 focus-visible:ring-[#c15f3c] cursor-pointer"
+        className="h-10 w-10 rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-card hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
         title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       >
         {theme === "dark" ? (
-          <Sun className="size-[1.2rem] text-[#c15f3c] transition-all duration-300 rotate-0 scale-100" />
+          <Sun className="size-[1.2rem] text-primary transition-all duration-300 rotate-0 scale-100" />
         ) : (
-          <Moon className="size-[1.2rem] text-[#c15f3c] transition-all duration-300 rotate-0 scale-100" />
+          <Moon className="size-[1.2rem] text-primary transition-all duration-300 rotate-0 scale-100" />
         )}
       </Button>
     </div>

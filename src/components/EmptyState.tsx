@@ -30,7 +30,7 @@ export function EmptyState({ hasProviders, onNew }: Props) {
             src="/animate.mp4"
             fallbackSrc="/logo2.png"
             alt="Claude Config"
-            className="mx-auto h-32 w-auto dark:invert-0 dark:hue-rotate-0 dark:mix-blend-normal invert hue-rotate-180 mix-blend-multiply"
+            className="mx-auto h-32 w-auto dark:invert-0 dark:hue-rotate-0 dark:mix-blend-screen invert hue-rotate-180 mix-blend-multiply"
           />
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">

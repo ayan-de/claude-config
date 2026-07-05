@@ -197,7 +197,7 @@ export default function Page() {
                       "text-[10px] font-medium px-2.5 py-0.5 rounded-full shrink-0 border select-none transition-all duration-150",
                       loadingId
                         ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
-                        : "bg-[#c15f3c]/10 text-[#c15f3c] border-[#c15f3c]/20",
+                        : "bg-primary/10 text-primary border-primary/20",
                     )}
                   >
                     {loadingId ? "switching…" : "connected"}
