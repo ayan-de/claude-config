@@ -20,7 +20,9 @@ export interface ProviderInput {
   id?: string;
   name: string;
   base_url: string;
-  auth_token: string;
+  // Required on create. Omit (or leave undefined) on update to keep the
+  // existing keyring token; supply a new value only to rotate it.
+  auth_token?: string;
   model?: string;
   smallFastModel?: string;
   defaultSonnetModel?: string;

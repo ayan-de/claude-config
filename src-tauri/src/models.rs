@@ -76,12 +76,15 @@ pub struct Provider {
 
 /// What the frontend posts when saving a new or edited provider.
 /// Token lives in a separate field because it goes to the keyring.
+/// `auth_token` is optional: required when creating (`id: None`), and
+/// treated as "keep existing" when updating without a new value.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderInput {
     pub id: Option<String>,
     pub name: String,
     pub base_url: String,
-    pub auth_token: String,
+    #[serde(default)]
+    pub auth_token: Option<String>,
 
     #[serde(default)]
     pub model: Option<String>,

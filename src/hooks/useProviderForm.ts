@@ -73,11 +73,12 @@ export function useProviderForm({ editing, onSave, isSaving }: UseProviderFormPr
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+    const trimmedToken = authToken.trim();
     await onSave({
       id: editing?.id,
       name: finalName,
       base_url: baseUrl.trim(),
-      auth_token: authToken.trim() || (editing ? "unchanged" : ""),
+      auth_token: trimmedToken ? trimmedToken : undefined,
       model: model.trim() || undefined,
       smallFastModel: smallFastModel.trim() || undefined,
       defaultSonnetModel: defaultSonnetModel.trim() || undefined,

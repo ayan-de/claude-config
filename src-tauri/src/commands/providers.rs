@@ -31,7 +31,14 @@ pub fn add_provider_cmd(
     state: tauri::State<'_, AppState>,
     input: ProviderInput,
 ) -> AppResult<Provider> {
-    validate_input(&input)?;
+    validate_input(&input, /* require_token */ true)?;
+    let token = input
+        .auth_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| AppError::Validation("auth_token is required".into()))?
+        .to_string();
 
     let mut file = load_providers_file(&state.providers_path())?;
     if file.providers.iter().any(|p| p.name == input.name) {
@@ -54,7 +61,7 @@ pub fn add_provider_cmd(
         updated_at: now,
     };
 
-    state.keyring.set_token(&provider.id, &input.auth_token)?;
+    state.keyring.set_token(&provider.id, &token)?;
     file.providers.push(provider.clone());
     save_providers_file(&state.providers_path(), &file)?;
     Ok(provider)
@@ -65,7 +72,7 @@ pub fn update_provider_cmd(
     state: tauri::State<'_, AppState>,
     input: ProviderInput,
 ) -> AppResult<Provider> {
-    validate_input(&input)?;
+    validate_input(&input, /* require_token */ false)?;
     let id = input
         .id
         .clone()
@@ -103,7 +110,16 @@ pub fn update_provider_cmd(
         updated_at: now,
     };
 
-    state.keyring.set_token(&id, &input.auth_token)?;
+    // Only rotate the token when a non-empty one was supplied; otherwise
+    // leave the existing keyring entry alone.
+    if let Some(token) = input
+        .auth_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        state.keyring.set_token(&id, token)?;
+    }
     file.providers[pos] = updated.clone();
     save_providers_file(&state.providers_path(), &file)?;
     Ok(updated)
@@ -130,10 +146,12 @@ pub fn delete_provider_cmd(
 
 #[tauri::command]
 pub fn validate_provider_cmd(input: ProviderInput) -> AppResult<()> {
-    validate_input(&input)
+    // Treat an input without an id as a create — token required.
+    let require_token = input.id.is_none();
+    validate_input(&input, require_token)
 }
 
-fn validate_input(input: &ProviderInput) -> AppResult<()> {
+fn validate_input(input: &ProviderInput, require_token: bool) -> AppResult<()> {
     if input.name.trim().is_empty() {
         return Err(AppError::Validation("name is required".into()));
     }
@@ -148,7 +166,14 @@ fn validate_input(input: &ProviderInput) -> AppResult<()> {
             "base_url must use http or https".into(),
         ));
     }
-    if input.auth_token.trim().is_empty() {
+    if require_token
+        && input
+            .auth_token
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+    {
         return Err(AppError::Validation("auth_token is required".into()));
     }
     if let Some(ms) = input.api_timeout_ms {
