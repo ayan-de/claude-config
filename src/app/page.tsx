@@ -3,7 +3,6 @@
 
 import { PanelLeftOpen } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { isWebEnv, kindLabel, providerSubtitle } from "@/lib/utils-app";
 import { useProvidersApp } from "@/hooks/useProvidersApp";
 import { cn } from "@/lib/utils";
@@ -94,16 +93,6 @@ export default function Page() {
       <TitleBar
         left={
           <div className="flex items-center gap-3 shrink-0">
-            {sidebarCollapsed && (
-              <Button
-                variant="ghost"
-                className="h-7 w-7 p-0 tauri-no-drag shrink-0"
-                onClick={toggleSidebar}
-                title="Expand sidebar"
-              >
-                <PanelLeftOpen className="size-3.5" />
-              </Button>
-            )}
             <div className="flex items-center gap-3 shrink-0">
               <div className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-[#f4f3ee]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -138,7 +127,17 @@ export default function Page() {
         }
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 relative">
+        {sidebarCollapsed && (
+          <button
+            onClick={toggleSidebar}
+            title="Expand sidebar"
+            className="absolute left-4 top-4 z-40 size-8 rounded-full border bg-popover hover:bg-muted shadow-md flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 text-muted-foreground hover:text-foreground"
+          >
+            <PanelLeftOpen className="size-4" />
+          </button>
+        )}
+
         <ProviderList
           collapsed={sidebarCollapsed}
           onToggleCollapse={toggleSidebar}
