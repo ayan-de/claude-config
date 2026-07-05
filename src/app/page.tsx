@@ -17,6 +17,8 @@ import { ProviderList } from "@/components/ProviderList";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { TitleBar } from "@/components/TitleBar";
+import { UpdateBanner } from "@/components/UpdateBanner";
+import { useUpdater } from "@/hooks/useUpdater";
 
 export default function Page() {
   const {
@@ -49,6 +51,16 @@ export default function Page() {
     handleExport,
     handleImport,
   } = useProvidersApp();
+
+  const {
+    available: updateAvailable,
+    version: updateVersion,
+    downloading: updateDownloading,
+    dismissed: updateDismissed,
+    checkNow: handleCheckForUpdates,
+    installUpdate: handleInstallUpdate,
+    dismiss: handleDismissUpdate,
+  } = useUpdater();
 
   if (!mounted) {
     return (
@@ -118,10 +130,12 @@ export default function Page() {
             <SettingsMenu
               appDataDir={appDataDir}
               claudeDir={claudeDir}
+              updateAvailable={updateAvailable}
               onRevealAppDir={handleRevealAppDir}
               onRevealClaudeDir={handleRevealClaudeDir}
               onExport={handleExport}
               onImport={handleImport}
+              onCheckForUpdates={handleCheckForUpdates}
             />
           </div>
         }
@@ -157,6 +171,15 @@ export default function Page() {
         <main className={cn("flex-1 overflow-y-auto p-6", !showForm && "flex flex-col justify-center")}>
           <div className={cn("mx-auto max-w-2xl w-full", !showForm ? "flex-1 flex flex-col justify-center space-y-6" : "space-y-4")}>
             <KeyringWarning status={keyring} />
+
+            {updateAvailable && updateVersion && !updateDismissed && !showForm && (
+              <UpdateBanner
+                version={updateVersion}
+                downloading={updateDownloading}
+                onInstall={handleInstallUpdate}
+                onDismiss={handleDismissUpdate}
+              />
+            )}
 
             {customEnvKeys && !showForm && (
               <CustomConfigBanner

@@ -4,6 +4,7 @@ import {
   Download,
   ExternalLink,
   FolderOpen,
+  RefreshCw,
   Settings as SettingsIcon,
   Upload,
 } from "lucide-react";
@@ -21,28 +22,43 @@ import {
 interface Props {
   appDataDir: string | null;
   claudeDir: string | null;
+  updateAvailable: boolean;
   onRevealAppDir: () => void;
   onRevealClaudeDir: () => void;
   onExport: (includeSecrets: boolean) => void;
   onImport: () => void;
+  onCheckForUpdates: () => void;
 }
 
 export function SettingsMenu({
   appDataDir,
   claudeDir,
+  updateAvailable,
   onRevealAppDir,
   onRevealClaudeDir,
   onExport,
   onImport,
+  onCheckForUpdates,
 }: Props) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon-sm" aria-label="Settings" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Settings"
+            className="relative"
+          />
         }
       >
         <SettingsIcon className="size-4" />
+        {updateAvailable && (
+          <span
+            aria-hidden
+            className="absolute right-1 top-1 size-2 rounded-full bg-red-500 ring-2 ring-card/30"
+          />
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuGroup>
@@ -76,6 +92,17 @@ export function SettingsMenu({
           <DropdownMenuItem onClick={onImport}>
             <Upload />
             Import providers
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Updates</DropdownMenuLabel>
+          <DropdownMenuItem onClick={onCheckForUpdates}>
+            <RefreshCw />
+            <span className="flex-1">Check for updates</span>
+            {updateAvailable && (
+              <span className="ml-2 size-2 shrink-0 rounded-full bg-red-500" />
+            )}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
