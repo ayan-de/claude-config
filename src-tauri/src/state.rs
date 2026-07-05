@@ -19,4 +19,9 @@ impl AppState {
     pub fn backups_dir(&self) -> PathBuf {
         self.app_data_dir.join("backups")
     }
+    /// Pointer file: `{"activeProviderId": "<uuid>"}`. Written on every
+    /// successful `load_provider_cmd`; read by `get_active_provider_cmd`.
+    pub fn state_path(&self) -> PathBuf {
+        self.app_data_dir.join("state.json")
+    }
 }
