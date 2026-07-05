@@ -2,6 +2,13 @@
 //!
 //! Schema versioned. On unrecognized future versions we back up the existing
 //! file and start fresh — never silently lose data.
+//!
+//! ## Silent v1 → v2 migration
+//!
+//! v1 files have no `kind` field on providers (only Custom-relay was
+//! supported). When we read a v1 file, serde defaults the missing `kind` to
+//! `Custom` (see `models::default_kind_custom`), and we bump the in-memory
+//! `schema_version` to 2 so the next save re-serializes as v2.
 
 use std::fs;
 use std::path::Path;
@@ -13,17 +20,24 @@ use crate::models::{AppError, AppResult, ProvidersFile};
 
 #[allow(dead_code)] // Documented constant for future external callers.
 pub const PROVIDERS_FILENAME: &str = "providers.json";
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 #[allow(dead_code)] // Reserved for surfacing schema errors back to UI explicitly.
 #[derive(Debug)]
 pub enum ProvidersFileError {
-    UnsupportedVersion { found: u32, supported: u32, raw_path: std::path::PathBuf },
+    UnsupportedVersion {
+        found: u32,
+        supported: u32,
+        raw_path: std::path::PathBuf,
+    },
 }
 
 impl std::fmt::Display for ProvidersFileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProvidersFileError::UnsupportedVersion { found, supported, .. } => {
+            ProvidersFileError::UnsupportedVersion {
+                found, supported, ..
+            } => {
                 write!(
                     f,
                     "unsupported providers.json schema version {found}; this app supports up to {supported}"
@@ -36,6 +50,10 @@ impl std::error::Error for ProvidersFileError {}
 
 /// Load providers.json from disk. Returns `Ok(ProvidersFile::default())`
 /// if the file doesn't exist yet (first launch).
+///
+/// v1 files are auto-migrated in memory: missing `kind` fields default to
+/// `Custom` and `schema_version` is bumped to 2 so the next `save_providers_file`
+/// persists the migration.
 pub fn load_providers_file(path: &Path) -> AppResult<ProvidersFile> {
     if !path.exists() {
         return Ok(ProvidersFile::default());
@@ -44,26 +62,45 @@ pub fn load_providers_file(path: &Path) -> AppResult<ProvidersFile> {
     if bytes.is_empty() {
         return Ok(ProvidersFile::default());
     }
-    let raw: Value = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::MalformedSettings {
+    let raw: Value =
+        serde_json::from_slice(&bytes).map_err(|e| AppError::MalformedSettings {
             path: path.display().to_string(),
             message: format!("providers.json: {e}"),
         })?;
 
-    // Schema-version check
-    let version = raw.get("schemaVersion").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    if version > 1 {
+    // Schema-version pre-check. Real files use snake_case `schema_version`
+    // (matches the struct field). Fall back to camelCase for any historical
+    // divergence — cheap and future-proof.
+    let version = raw
+        .get("schema_version")
+        .or_else(|| raw.get("schemaVersion"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    if version > SUPPORTED_SCHEMA_VERSION {
         // Back up and reset rather than panic; surface via error so caller
         // can decide whether to show a dialog or proceed.
         let backup = path.with_extension(format!("json.unsupported-v{version}.bak"));
         let _ = fs::copy(path, &backup);
         return Err(AppError::Internal(format!(
-            "providers.json schema version {version} is newer than supported; backed up to {}",
+            "providers.json schema version {version} is newer than supported ({SUPPORTED_SCHEMA_VERSION}); backed up to {}",
             backup.display()
         )));
     }
 
-    let file: ProvidersFile = serde_json::from_value(raw)?;
+    let mut file: ProvidersFile = serde_json::from_value(raw)?;
+
+    // Silent auto-migration: force in-memory version to current so the next
+    // save writes the new schema. Existing providers already have kind=Custom
+    // via serde default when the field was missing.
+    if file.schema_version < SUPPORTED_SCHEMA_VERSION {
+        log::info!(
+            "migrating providers.json from schema v{} to v{SUPPORTED_SCHEMA_VERSION}",
+            file.schema_version
+        );
+        file.schema_version = SUPPORTED_SCHEMA_VERSION;
+    }
+
     Ok(file)
 }
 
@@ -76,10 +113,7 @@ pub fn save_providers_file(path: &Path, file: &ProvidersFile) -> AppResult<()> {
     }
     let bytes = serde_json::to_vec_pretty(file)?;
     let parent = path.parent().ok_or_else(|| {
-        AppError::Validation(format!(
-            "providers path has no parent: {}",
-            path.display()
-        ))
+        AppError::Validation(format!("providers path has no parent: {}", path.display()))
     })?;
     let mut tmp = NamedTempFile::new_in(parent)?;
     std::io::Write::write_all(&mut tmp, &bytes)?;
@@ -93,7 +127,7 @@ pub fn save_providers_file(path: &Path, file: &ProvidersFile) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Provider;
+    use crate::models::{Provider, ProviderKind};
 
     fn fresh_dir(name: &str) -> std::path::PathBuf {
         let d = tempfile::tempdir().unwrap().keep().join(name);
@@ -101,51 +135,123 @@ mod tests {
         d
     }
 
+    fn sample_custom(id: &str, name: &str) -> Provider {
+        Provider {
+            id: id.into(),
+            name: name.into(),
+            kind: ProviderKind::Custom,
+            base_url: Some("https://x".into()),
+            aws_region: None,
+            aws_profile: None,
+            vertex_project_id: None,
+            vertex_region: None,
+            google_application_credentials: None,
+            subscription_label: None,
+            model: Some("claude-sonnet-4-6".into()),
+            small_fast_model: None,
+            default_sonnet_model: None,
+            default_opus_model: None,
+            default_haiku_model: None,
+            api_timeout_ms: None,
+            disable_nonessential_traffic: None,
+            created_at: "2026-07-04T00:00:00Z".into(),
+            updated_at: "2026-07-04T00:00:00Z".into(),
+        }
+    }
+
     #[test]
     fn load_returns_default_when_missing() {
         let p = fresh_dir("data").join("providers.json");
         let f = load_providers_file(&p).unwrap();
-        assert_eq!(f.schema_version, 1);
+        assert_eq!(f.schema_version, SUPPORTED_SCHEMA_VERSION);
         assert!(f.providers.is_empty());
     }
 
     #[test]
-    fn save_then_load_roundtrip() {
+    fn save_then_load_roundtrip_v2() {
         let dir = fresh_dir("data");
         let p = dir.join("providers.json");
         let file = ProvidersFile {
-            schema_version: 1,
-            providers: vec![Provider {
-                id: "abc".into(),
-                name: "test".into(),
-                base_url: "https://x".into(),
-                model: Some("claude-sonnet-4-6".into()),
-                small_fast_model: None,
-                default_sonnet_model: None,
-                default_opus_model: None,
-                default_haiku_model: None,
-                api_timeout_ms: None,
-                disable_nonessential_traffic: None,
-                created_at: "2026-07-04T00:00:00Z".into(),
-                updated_at: "2026-07-04T00:00:00Z".into(),
-            }],
+            schema_version: 2,
+            providers: vec![sample_custom("abc", "test")],
         };
         save_providers_file(&p, &file).unwrap();
         let loaded = load_providers_file(&p).unwrap();
+        assert_eq!(loaded.schema_version, 2);
         assert_eq!(loaded.providers.len(), 1);
         assert_eq!(loaded.providers[0].name, "test");
+        assert_eq!(loaded.providers[0].kind, ProviderKind::Custom);
         assert_eq!(loaded.providers[0].model.as_deref(), Some("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn migrates_v1_file_silently() {
+        // Mimics a v1 providers.json: no `kind` field on providers, schema
+        // version 1. Deserialization must succeed (with kind=Custom), and the
+        // loaded schema_version must be bumped to 2 so the next save is v2.
+        let dir = fresh_dir("data");
+        let p = dir.join("providers.json");
+        let v1_json = r#"{
+            "schema_version": 1,
+            "providers": [
+                {
+                    "id": "7ad6c1f5-d79b-49bd-a6cb-29fa6ea01602",
+                    "name": "minimax",
+                    "base_url": "https://api.minimax.io/anthropic",
+                    "model": "MiniMax-M3[1m]",
+                    "smallFastModel": "MiniMax-M3[1m]",
+                    "created_at": "2026-07-04T17:07:06Z",
+                    "updated_at": "2026-07-04T17:07:06Z"
+                },
+                {
+                    "id": "aa776292-8215-4a92-a3b7-b12b1518534d",
+                    "name": "freemodel",
+                    "base_url": "https://cc.freemodel.dev",
+                    "created_at": "2026-07-04T20:53:30Z",
+                    "updated_at": "2026-07-04T20:53:30Z"
+                }
+            ]
+        }"#;
+        fs::write(&p, v1_json).unwrap();
+        let loaded = load_providers_file(&p).unwrap();
+        assert_eq!(loaded.schema_version, SUPPORTED_SCHEMA_VERSION);
+        assert_eq!(loaded.providers.len(), 2);
+        assert!(loaded.providers.iter().all(|p| p.kind == ProviderKind::Custom));
+        assert_eq!(
+            loaded.providers[0].base_url.as_deref(),
+            Some("https://api.minimax.io/anthropic")
+        );
+    }
+
+    #[test]
+    fn migration_persists_after_save() {
+        let dir = fresh_dir("data");
+        let p = dir.join("providers.json");
+        let v1_json = r#"{
+            "schema_version": 1,
+            "providers": [
+                {"id": "a", "name": "n", "base_url": "https://x",
+                 "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}
+            ]
+        }"#;
+        fs::write(&p, v1_json).unwrap();
+        let loaded = load_providers_file(&p).unwrap();
+        // Round-trip: save the loaded (now v2) file, re-read, should be clean v2.
+        save_providers_file(&p, &loaded).unwrap();
+        let reloaded = load_providers_file(&p).unwrap();
+        assert_eq!(reloaded.schema_version, 2);
+        assert_eq!(reloaded.providers[0].kind, ProviderKind::Custom);
+        // Verify the raw JSON now contains the kind field.
+        let raw = fs::read_to_string(&p).unwrap();
+        assert!(raw.contains("\"kind\": \"custom\""), "raw json: {raw}");
+        assert!(raw.contains("\"schema_version\": 2"), "raw json: {raw}");
     }
 
     #[test]
     fn unsupported_version_errors_and_backs_up() {
         let dir = fresh_dir("data");
         let p = dir.join("providers.json");
-        fs::write(
-            &p,
-            r#"{"schemaVersion": 99, "providers": []}"#,
-        )
-        .unwrap();
+        fs::write(&p, r#"{"schema_version": 99, "providers": []}"#).unwrap();
         let err = load_providers_file(&p).unwrap_err();
         assert!(matches!(err, AppError::Internal(_)));
         // .bak file created

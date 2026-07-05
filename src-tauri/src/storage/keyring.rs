@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use crate::models::AppError;
+use crate::models::{AppError, ProviderSecret};
 
 pub const KEYRING_SERVICE: &str = "claude-config";
 
@@ -78,22 +78,68 @@ impl KeyringStore {
         matches!(self.inner.status, KeyringStatus::Available)
     }
 
-    pub fn set_token(&self, provider_id: &str, token: &str) -> Result<(), KeyringError> {
+    /// Write a `ProviderSecret` as a JSON blob into the keyring entry for
+    /// `provider_id`. This is the multi-kind-aware storage path. Prefer this
+    /// over `set_token` for any new code.
+    pub fn set_secret(
+        &self,
+        provider_id: &str,
+        secret: &ProviderSecret,
+    ) -> Result<(), KeyringError> {
         self.ensure_available()?;
+        let json = serde_json::to_string(secret)
+            .map_err(|e| KeyringError::Backend(format!("serialize secret: {e}")))?;
         let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
             .map_err(|e| KeyringError::Backend(e.to_string()))?;
         entry
-            .set_password(token)
+            .set_password(&json)
             .map_err(|e| KeyringError::Backend(e.to_string()))
     }
 
-    pub fn get_token(&self, provider_id: &str) -> Result<String, KeyringError> {
+    /// Read a `ProviderSecret` from the keyring entry for `provider_id`.
+    ///
+    /// Backwards compatibility: for entries written by the schema-v1 codepath,
+    /// the keyring value is a raw token string (not JSON). If parsing as
+    /// `ProviderSecret` fails, we fall back to interpreting the value as
+    /// `ProviderSecret::Custom { auth_token }` — v1 only ever stored
+    /// custom-relay tokens.
+    pub fn get_secret(&self, provider_id: &str) -> Result<ProviderSecret, KeyringError> {
         self.ensure_available()?;
         let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
             .map_err(|e| KeyringError::Backend(e.to_string()))?;
-        entry
+        let raw = entry
             .get_password()
-            .map_err(|e| KeyringError::Backend(e.to_string()))
+            .map_err(|e| KeyringError::Backend(e.to_string()))?;
+        match serde_json::from_str::<ProviderSecret>(&raw) {
+            Ok(secret) => Ok(secret),
+            Err(_) => Ok(ProviderSecret::Custom { auth_token: raw }),
+        }
+    }
+
+    /// Legacy helper: write a raw auth token for a Custom-kind provider.
+    /// Wraps `set_secret` with `ProviderSecret::Custom` so callers that only
+    /// have a token string (legacy tests) keep working.
+    #[allow(dead_code)]
+    pub fn set_token(&self, provider_id: &str, token: &str) -> Result<(), KeyringError> {
+        self.set_secret(
+            provider_id,
+            &ProviderSecret::Custom {
+                auth_token: token.to_string(),
+            },
+        )
+    }
+
+    /// Legacy helper: read a Custom-kind auth token. Returns an error for
+    /// other kinds — callers should migrate to `get_secret`.
+    #[allow(dead_code)]
+    pub fn get_token(&self, provider_id: &str) -> Result<String, KeyringError> {
+        match self.get_secret(provider_id)? {
+            ProviderSecret::Custom { auth_token } => Ok(auth_token),
+            other => Err(KeyringError::Backend(format!(
+                "provider {provider_id} secret is not a custom auth token (kind: {:?})",
+                other.kind()
+            ))),
+        }
     }
 
     pub fn delete_token(&self, provider_id: &str) -> Result<(), KeyringError> {
