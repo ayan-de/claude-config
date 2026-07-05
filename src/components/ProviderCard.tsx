@@ -4,7 +4,6 @@ import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { cn } from "@/lib/utils";
-import { kindLabel, providerSubtitle } from "@/lib/utils-app";
 import type { Provider } from "@/lib/types";
 
 interface Props {
@@ -26,107 +25,130 @@ export function ProviderCard({
   onLoad,
   onDelete,
 }: Props) {
-  const subtitle = providerSubtitle(provider);
-  const badge = kindLabel(provider.kind);
+  // Determine clean display subtitle
+  const getCleanSubtitle = () => {
+    switch (provider.kind) {
+      case "subscription":
+        return provider.subscriptionLabel
+          ? `Subscription (${provider.subscriptionLabel})`
+          : "Subscription";
+      case "console":
+        return "Anthropic Console";
+      case "bedrock":
+        return provider.awsRegion ? `Bedrock (${provider.awsRegion})` : "Amazon Bedrock";
+      case "vertex":
+        return provider.vertexRegion ? `Vertex AI (${provider.vertexRegion})` : "Google Vertex AI";
+      case "custom":
+      default:
+        return "Custom Relay";
+    }
+  };
+
+  const subtitle = getCleanSubtitle();
 
   return (
     <div
       className={cn(
-        "group relative cursor-pointer rounded-xl border bg-card/60 py-2.5 px-3 transition-all duration-200 select-none flex flex-col items-center gap-2",
+        "group relative cursor-pointer rounded-xl border py-2.5 px-3 transition-all duration-200 select-none flex items-center justify-between gap-3 bg-card/45",
         isActive
-          ? "border-primary/40 bg-primary/5 shadow-[0_0_12px_var(--primary)] shadow-primary/5"
+          ? "border-primary/40 bg-primary/5 shadow-sm"
           : isSelected
           ? "border-foreground/30 bg-card/90"
-          : "border-border hover:border-foreground/20 hover:bg-card/80",
+          : "border-border/60 hover:border-foreground/20 hover:bg-card/70",
       )}
       onClick={onSelect}
       role="button"
       aria-pressed={isActive ? "true" : "false"}
       aria-label={`Switch to ${provider.name}`}
     >
-      {/* hover-only actions positioned absolutely in the top-right corner */}
-      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect();
-          }}
-          className="h-5 w-5 p-0 hover:bg-accent cursor-pointer"
-          aria-label="Edit"
-        >
-          <Pencil className="size-2.5 text-muted-foreground hover:text-foreground" />
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="h-5 w-5 p-0 hover:bg-destructive/10 cursor-pointer"
-          aria-label="Delete"
-        >
-          <Trash2 className="size-2.5 text-muted-foreground hover:text-destructive" />
-        </Button>
-      </div>
+      {/* Left section: Logo + Name & Subtitle */}
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        {/* Logo Container */}
+        <div className="relative size-8 rounded-lg border bg-muted/20 flex items-center justify-center shrink-0 overflow-hidden">
+          <ProviderLogo
+            svg={provider.logoSvg}
+            size={20}
+            className="rounded"
+          />
+        </div>
 
-      {/* Logo, top-left. Always reserves space so cards stay aligned. */}
-      <ProviderLogo
-        svg={provider.logoSvg}
-        size={22}
-        className="absolute top-1.5 left-1.5 rounded"
-      />
-
-      {/* Center: Circuit-breaker Toggle Switch */}
-      <div
-        className="tauri-no-drag"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!isLoading) onLoad();
-        }}
-      >
-        <div
-          className={cn(
-            "w-11 h-6 rounded-full border relative transition-colors duration-150 flex items-center cursor-pointer",
-            isActive
-              ? "bg-primary/20 border-primary/30"
-              : "bg-muted/40 border-border hover:bg-muted/60",
-            isLoading && "opacity-80 cursor-wait"
-          )}
-        >
-          <div
+        {/* Text Details */}
+        <div className="min-w-0 flex-1 flex flex-col justify-center">
+          <p
             className={cn(
-              "absolute top-[2.5px] w-[17px] h-[17px] rounded-full transition-all duration-150 flex items-center justify-center",
-              isActive
-                ? "left-[22.5px] bg-primary border border-primary"
-                : "left-[2.5px] bg-background border border-muted-foreground/30",
+              "text-xs font-semibold truncate leading-none transition-colors",
+              isActive ? "text-foreground" : "text-foreground/90",
             )}
           >
-            {isLoading && (
-              <Loader2 className="size-2 animate-spin text-primary" />
-            )}
-          </div>
+            {provider.name}
+          </p>
+          <p className="text-[10px] text-muted-foreground/80 truncate leading-none mt-1">
+            {subtitle}
+          </p>
         </div>
       </div>
 
-      {/* Bottom: Provider details */}
-      <div className="text-center min-w-0 w-full">
-        <p
-          className={cn(
-            "text-xs font-semibold truncate leading-none transition-colors",
-            isActive ? "text-foreground" : "text-muted-foreground",
-          )}
+      {/* Right section: Toggle Switch / Actions */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Switch */}
+        <div
+          className="tauri-no-drag"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isLoading) onLoad();
+          }}
         >
-          {provider.name}
-        </p>
-        <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground/75 leading-none">
-          {subtitle}
-        </p>
-        <p className="mt-1 inline-block rounded-full border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-muted-foreground/80 leading-none">
-          {badge}
-        </p>
+          <div
+            className={cn(
+              "w-[34px] h-[20px] rounded-full border relative transition-colors duration-150 flex items-center cursor-pointer",
+              isActive
+                ? "bg-primary/20 border-primary/30"
+                : "bg-muted/40 border-border hover:bg-muted/60",
+              isLoading && "opacity-80 cursor-wait"
+            )}
+          >
+            <div
+              className={cn(
+                "absolute top-[2px] w-[14px] h-[14px] rounded-full transition-all duration-150 flex items-center justify-center",
+                isActive
+                  ? "left-[16px] bg-primary"
+                  : "left-[2px] bg-background border border-muted-foreground/30",
+              )}
+            >
+              {isLoading && (
+                <Loader2 className="size-1.5 animate-spin text-primary" />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Hover Actions overlay (floating toolbar to the left of the switch) */}
+        <div className="absolute right-[54px] top-1/2 -translate-y-1/2 flex items-center border bg-card/95 dark:bg-card/98 shadow-md rounded-lg p-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0 pointer-events-none group-hover:pointer-events-auto">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+            }}
+            className="h-6 w-6 p-0 hover:bg-muted dark:hover:bg-muted/50 cursor-pointer"
+            aria-label="Edit"
+          >
+            <Pencil className="size-3 text-muted-foreground hover:text-foreground" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="h-6 w-6 p-0 hover:bg-destructive/10 cursor-pointer"
+            aria-label="Delete"
+          >
+            <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
+          </Button>
+        </div>
       </div>
     </div>
   );
