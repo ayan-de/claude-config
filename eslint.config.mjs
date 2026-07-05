@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Rust build artifacts (Tauri injects generated JS here).
     "src-tauri/target/**",
+    // Separate worktrees — not part of this branch's lint set.
+    ".worktrees/**",
   ]),
 ]);
 
