@@ -153,7 +153,7 @@ export default function Page() {
           onNew={handleNew}
         />
 
-        <main className={cn("flex-1 overflow-y-auto p-6 bg-black", !showForm && "flex flex-col justify-center")}>
+        <main className={cn("flex-1 overflow-y-auto p-6", !showForm && "flex flex-col justify-center")}>
           <div className={cn("mx-auto max-w-2xl w-full", !showForm ? "flex-1 flex flex-col justify-center space-y-6" : "space-y-4")}>
             <KeyringWarning status={keyring} />
 
@@ -197,7 +197,7 @@ export default function Page() {
                       "text-[10px] font-medium px-2.5 py-0.5 rounded-full shrink-0 border select-none transition-all duration-150",
                       loadingId
                         ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
-                        : "bg-[#b1ada1]/10 text-[#b1ada1] border-[#b1ada1]/20",
+                        : "bg-[#c15f3c]/10 text-[#c15f3c] border-[#c15f3c]/20",
                     )}
                   >
                     {loadingId ? "switching…" : "connected"}
