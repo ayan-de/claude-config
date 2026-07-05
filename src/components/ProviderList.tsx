@@ -46,7 +46,7 @@ export function ProviderList({
           Providers ({providers.length})
         </h2>
         <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={onNew} className="h-7 px-2 cursor-pointer">
+          <Button size="sm" variant="default" onClick={onNew} className="h-7 px-2 cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-secondary/80">
             <Plus className="size-3.5" />
             New
           </Button>
