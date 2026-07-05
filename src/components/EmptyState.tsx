@@ -24,13 +24,13 @@ export function EmptyState({ hasProviders, onNew }: Props) {
 
   if (hasProviders) {
     return (
-      <div className="flex h-full items-center justify-center bg-black py-6">
+      <div className="flex h-full items-center justify-center bg-transparent py-6">
         <div className="space-y-4 text-center">
           <LoopVideo
             src="/animate.mp4"
             fallbackSrc="/logo2.png"
             alt="Claude Config"
-            className="mx-auto h-32 w-auto"
+            className="mx-auto h-32 w-auto dark:invert-0 dark:hue-rotate-0 dark:mix-blend-normal invert hue-rotate-180 mix-blend-multiply"
           />
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">
