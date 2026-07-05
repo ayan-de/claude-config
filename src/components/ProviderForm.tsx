@@ -730,7 +730,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
     const label = preset?.name ?? "Custom";
     const apiKeyUrl = getPresetApiKeyUrl(f.selectedPresetId);
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center gap-2.5 rounded-lg border bg-muted/20 p-2.5">
           <ProviderLogo svg={editing.logoSvg} size={28} className="rounded" />
           <div className="min-w-0 flex-1">
@@ -741,19 +741,34 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
             </p>
           </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="baseUrl">Base URL</Label>
-          <Input
-            id="baseUrl"
-            value={f.baseUrl}
-            onChange={(e) => f.setBaseUrl(e.target.value)}
-            placeholder="https://api.example.com"
-            className={cn(f.urlError && "border-destructive")}
-          />
-          {f.urlError && (
-            <p className="text-xs text-destructive">{f.urlError}</p>
-          )}
+
+        <div className="flex items-start gap-4">
+          {/* Left column: Circular logo preview (locked) */}
+          <div className="shrink-0 pt-1.5 flex flex-col items-center gap-1.5">
+            <div className="relative size-16 rounded-full border border-solid flex items-center justify-center bg-muted/10 overflow-hidden">
+              <ProviderLogo svg={editing.logoSvg} size={44} className="rounded-full" />
+            </div>
+          </div>
+
+          {/* Right column: Base URL field */}
+          <div className="flex-1 min-w-0">
+            <div className="space-y-1.5">
+              <Label htmlFor="baseUrl">Base URL</Label>
+              <Input
+                id="baseUrl"
+                value={f.baseUrl}
+                onChange={(e) => f.setBaseUrl(e.target.value)}
+                placeholder="https://api.example.com"
+                className={cn(f.urlError && "border-destructive")}
+              />
+              {f.urlError && (
+                <p className="text-xs text-destructive">{f.urlError}</p>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Auth token (full width) */}
         <div className="space-y-1.5">
           <Label htmlFor="authToken">Auth token</Label>
           {apiKeyUrl && <PresetApiKeyHint url={apiKeyUrl} />}
@@ -804,7 +819,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
               )}
             </SelectValue>
           </SelectTrigger>
-          <SelectContent collisionAvoidance={{ side: "none" }}>
+          <SelectContent>
             {PRESET_PROVIDERS.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
@@ -822,71 +837,73 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         </p>
       </div>
 
-      {/* Logo preview + upload */}
-      <div className="flex items-center gap-3 rounded-lg border bg-muted/15 p-2.5">
-        <ProviderLogo svg={f.logoSvg} size={32} className="rounded" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium leading-none">
-            Logo (optional)
-          </p>
-          <p className="mt-1 truncate text-[10px] text-muted-foreground">
-            {f.selectedPresetId && f.selectedPresetId !== CUSTOM_SENTINEL
-              ? "Bundled with preset"
-              : f.logoSvg
-                ? "Custom upload"
-                : "None — upload an SVG"}
-          </p>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".svg,image/svg+xml"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0] ?? null;
-            f.handleLogoUpload(file);
-            // Reset so picking the same file twice still triggers onChange.
-            e.target.value = "";
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 cursor-pointer"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload className="size-3" />
-          {f.logoSvg ? "Replace" : "Upload"}
-        </Button>
-      </div>
-      {f.logoError && (
-        <p className="text-xs text-destructive">{f.logoError}</p>
-      )}
-
-      {/* Base URL */}
-      <div className="space-y-1.5">
-        <Label htmlFor="baseUrl">Base URL</Label>
-        <Input
-          id="baseUrl"
-          value={f.baseUrl}
-          onChange={(e) => f.setBaseUrl(e.target.value)}
-          placeholder="https://api.example.com"
-          className={cn(f.urlError && "border-destructive")}
-        />
-        {f.urlError ? (
-          <p className="text-xs text-destructive">{f.urlError}</p>
-        ) : (
-          <p className="text-[10px] text-muted-foreground">
-            Provider name:{" "}
-            <span className="font-mono font-medium text-foreground">
-              {f.derivedName || "—"}
+      <div className="flex items-start gap-4">
+        {/* Left column: Circular logo preview / upload */}
+        <div className="shrink-0 pt-1.5 flex flex-col items-center gap-1.5">
+          <div
+            className={cn(
+              "relative group size-16 rounded-full border flex items-center justify-center bg-muted/10 overflow-hidden transition-colors duration-150",
+              f.selectedPresetId === CUSTOM_SENTINEL ? "border-dashed hover:border-muted-foreground/50" : "border-solid"
+            )}
+          >
+            <ProviderLogo svg={f.logoSvg} size={44} className="rounded-full" />
+            {f.selectedPresetId === CUSTOM_SENTINEL && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".svg,image/svg+xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    f.handleLogoUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-[10px] text-white font-medium cursor-pointer"
+                >
+                  <Upload className="size-4 mb-0.5" />
+                  Upload
+                </button>
+              </>
+            )}
+          </div>
+          {f.selectedPresetId === CUSTOM_SENTINEL && (
+            <span className="text-[9px] text-muted-foreground font-medium select-none">
+              {f.logoSvg ? "Custom" : "Optional"}
             </span>
-          </p>
-        )}
+          )}
+        </div>
+
+        {/* Right column: Base URL field */}
+        <div className="flex-1 min-w-0">
+          <div className="space-y-1.5">
+            <Label htmlFor="baseUrl">Base URL</Label>
+            <Input
+              id="baseUrl"
+              value={f.baseUrl}
+              onChange={(e) => f.setBaseUrl(e.target.value)}
+              placeholder="https://api.example.com"
+              className={cn(f.urlError && "border-destructive")}
+            />
+            {f.urlError ? (
+              <p className="text-xs text-destructive">{f.urlError}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">
+                Provider name:{" "}
+                <span className="font-mono font-medium text-foreground">
+                  {f.derivedName || "—"}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Auth token */}
+      {/* Auth token (full width) */}
       <div className="space-y-1.5">
         <Label htmlFor="authToken">Auth token</Label>
         {getPresetApiKeyUrl(f.selectedPresetId) && (
@@ -906,6 +923,9 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
           Stored in OS keyring.
         </p>
       </div>
+      {f.logoError && (
+        <p className="text-xs text-destructive text-center mt-2">{f.logoError}</p>
+      )}
     </div>
   );
 }
