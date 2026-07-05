@@ -216,6 +216,7 @@ export default function Page() {
 
             {showForm ? (
               <ProviderForm
+                key={editingProvider?.id ?? "new"}
                 editing={editingProvider}
                 onCancel={handleCancel}
                 onSave={handleSave}
