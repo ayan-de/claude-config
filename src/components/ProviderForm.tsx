@@ -775,8 +775,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
     );
   }
 
-  const presetValue =
-    f.selectedPresetId === null ? "__none__" : f.selectedPresetId;
+  const presetValue = f.selectedPresetId ?? CUSTOM_SENTINEL;
 
   return (
     <div className="space-y-3">
@@ -786,10 +785,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         <Select
           value={presetValue}
           onValueChange={(v) => {
-            if (!v || v === "__none__") {
-              f.applyPreset(CUSTOM_SENTINEL);
-              return;
-            }
+            if (!v) return;
             if (v === CUSTOM_SENTINEL) {
               f.applyPreset(CUSTOM_SENTINEL);
               return;
@@ -798,10 +794,17 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
           }}
         >
           <SelectTrigger id="preset" className="w-full">
-            <SelectValue placeholder="— Select a preset —" />
+            <SelectValue>
+              {presetValue === CUSTOM_SENTINEL ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Plus className="size-3" /> Custom
+                </span>
+              ) : (
+                PRESET_PROVIDERS.find((p) => p.id === presetValue)?.name ?? "Custom"
+              )}
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">— Select a preset —</SelectItem>
+          <SelectContent collisionAvoidance={{ side: "none" }}>
             {PRESET_PROVIDERS.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
