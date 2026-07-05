@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { LoopVideo } from "@/components/LoopVideo";
 import { cn } from "@/lib/utils";
 import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
 import {
@@ -114,10 +115,20 @@ export function ProviderForm({
     return (
       <Card className="border-border/60">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">New Provider</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            How do you want Claude Code to authenticate?
-          </p>
+          <div className="flex items-center gap-5">
+            <div className="flex-1 min-w-0">
+              <CardTitle className="text-base">New Provider</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                How do you want Claude Code to authenticate?
+              </p>
+            </div>
+            <div className="shrink-0 overflow-hidden rounded-lg bg-muted/10 p-2">
+              <LoopVideo
+                src="/clawd-laptop.webm"
+                className="h-20 w-auto dark:invert-0 dark:hue-rotate-0 dark:mix-blend-screen invert hue-rotate-180 mix-blend-multiply"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -223,21 +234,49 @@ function KindForm({
   return (
     <Card className="border-border/60">
       <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="text-muted-foreground hover:text-foreground cursor-pointer"
-              aria-label="Back"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-          )}
-          <CardTitle className="text-base">
-            {editing ? `Edit “${editing.name}”` : `New ${kindLabel(kind)} provider`}
-          </CardTitle>
-        </div>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="text-muted-foreground hover:text-foreground cursor-pointer"
+                aria-label="Back"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+            )}
+            <CardTitle className="text-base">
+              Edit “{editing.name}”
+            </CardTitle>
+          </div>
+        ) : (
+          <div className="flex items-center gap-5">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                {onBack && (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="text-muted-foreground hover:text-foreground cursor-pointer"
+                    aria-label="Back"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </button>
+                )}
+                <CardTitle className="text-base">
+                  New {kindLabel(kind)} provider
+                </CardTitle>
+              </div>
+            </div>
+            <div className="shrink-0 overflow-hidden rounded-lg bg-muted/10 p-2">
+              <LoopVideo
+                src="/clawd-laptop.webm"
+                className="h-20 w-auto dark:invert-0 dark:hue-rotate-0 dark:mix-blend-screen invert hue-rotate-180 mix-blend-multiply"
+              />
+            </div>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <form onSubmit={f.handleSubmit} className="space-y-5">
