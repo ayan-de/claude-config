@@ -1,6 +1,10 @@
-//! Export/import the providers list. By default, auth tokens are NOT
-//! exported — they remain in the user's OS keyring. The `include_secrets`
-//! flag must be opted-in, and the UI must confirm before invoking it.
+//! Export/import the providers list. By default, secrets are NOT exported —
+//! they remain in the user's OS keyring. The `include_secrets` flag must be
+//! opted-in, and the UI must confirm before invoking it.
+//!
+//! In v2 the sidecar secrets file stores full `ProviderSecret` JSON blobs
+//! (keyed by provider id), so any kind — Subscription OAuth, AWS creds,
+//! Console API key, custom bearer — round-trips cleanly.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::models::{AppError, AppResult, Provider};
+use crate::models::{AppError, AppResult, Provider, ProviderSecret};
 use crate::state::AppState;
 use crate::storage::{load_providers_file, save_providers_file};
 
@@ -31,7 +35,7 @@ pub fn export_providers_cmd(
 ) -> AppResult<()> {
     let file = load_providers_file(&state.providers_path())?;
     let payload = ExportPayload {
-        schema_version: 1,
+        schema_version: 2,
         exported_at: Utc::now().to_rfc3339(),
         source_app: "claude-config".into(),
         providers: file.providers,
@@ -39,24 +43,11 @@ pub fn export_providers_cmd(
     let json = serde_json::to_vec_pretty(&payload)?;
 
     if !include_secrets {
-        // The Payload itself never embeds tokens (Provider struct doesn't
-        // have one), but we still re-serialize with explicit redaction to
-        // future-proof against a struct change.
-        let mut redacted: Map<String, Value> = serde_json::from_slice(&json)?;
-        if let Some(Value::Array(arr)) = redacted.get_mut("providers") {
-            for p in arr.iter_mut() {
-                if let Some(obj) = p.as_object_mut() {
-                    obj.remove("auth_token");
-                    obj.insert("auth_token".into(), Value::String("[redacted]".into()));
-                }
-            }
-        }
-        let redacted_bytes = serde_json::to_vec_pretty(&Value::Object(redacted))?;
-        write_atomic(&dest, &redacted_bytes)?;
+        write_atomic(&dest, &json)?;
     } else {
-        // include_secrets: write a sidecar JSON with tokens that pairs with
-        // the redacted main file. Two-file export keeps secrets out of
-        // accidental shares of the main file.
+        // include_secrets: sidecar JSON contains a map<id, ProviderSecret>.
+        // Two-file export keeps secrets out of accidental shares of the main
+        // file.
         let secrets = collect_secrets(&state, &payload.providers)?;
         write_atomic(&dest, &json)?;
         let secrets_dest = format!("{dest}.secrets.json");
@@ -72,17 +63,29 @@ pub fn import_providers_cmd(
     secrets_src: Option<String>,
 ) -> AppResult<usize> {
     let bytes = fs::read(&src).map_err(AppError::Io)?;
-    let payload: ExportPayload = serde_json::from_slice(&bytes).map_err(|e| {
-        AppError::MalformedSettings {
+    let payload: ExportPayload =
+        serde_json::from_slice(&bytes).map_err(|e| AppError::MalformedSettings {
             path: src.clone(),
             message: format!("import: {e}"),
-        }
-    })?;
-    let mut secrets: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(path) = secrets_src {
+        })?;
+    let secrets: BTreeMap<String, ProviderSecret> = if let Some(path) = secrets_src {
         let bytes = fs::read(&path).map_err(AppError::Io)?;
-        secrets = serde_json::from_slice(&bytes).map_err(AppError::Json)?;
-    }
+        // Try the v2 shape first (ProviderSecret map). Fall back to v1 raw-token
+        // map so pre-v2 exports still import.
+        match serde_json::from_slice::<BTreeMap<String, ProviderSecret>>(&bytes) {
+            Ok(m) => m,
+            Err(_) => {
+                let legacy: BTreeMap<String, String> =
+                    serde_json::from_slice(&bytes).map_err(AppError::Json)?;
+                legacy
+                    .into_iter()
+                    .map(|(k, v)| (k, ProviderSecret::Custom { auth_token: v }))
+                    .collect()
+            }
+        }
+    } else {
+        BTreeMap::new()
+    };
     let mut file = load_providers_file(&state.providers_path())?;
     let mut added = 0;
     let now = Utc::now().to_rfc3339();
@@ -92,12 +95,8 @@ pub fn import_providers_cmd(
             continue;
         }
         let new_id = Uuid::new_v4().to_string();
-        let token = secrets
-            .get(&p.id)
-            .cloned()
-            .unwrap_or_default();
-        if !token.is_empty() {
-            state.keyring.set_token(&new_id, &token)?;
+        if let Some(secret) = secrets.get(&p.id) {
+            state.keyring.set_secret(&new_id, secret)?;
         }
         let mut new_provider = p;
         new_provider.id = new_id;
@@ -116,12 +115,12 @@ fn collect_secrets(
 ) -> AppResult<Map<String, Value>> {
     let mut map = Map::new();
     for p in providers {
-        match state.keyring.get_token(&p.id) {
-            Ok(t) => {
-                map.insert(p.id.clone(), Value::String(t));
+        match state.keyring.get_secret(&p.id) {
+            Ok(s) => {
+                map.insert(p.id.clone(), serde_json::to_value(&s)?);
             }
             Err(e) => {
-                log::warn!("could not read token for provider {}: {e}", p.id);
+                log::warn!("could not read secret for provider {}: {e}", p.id);
             }
         }
     }
@@ -135,7 +134,10 @@ fn write_atomic(path: &str, bytes: &[u8]) -> AppResult<()> {
             fs::create_dir_all(parent)?;
         }
     }
-    let parent = p.parent().filter(|x| !x.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let parent = p
+        .parent()
+        .filter(|x| !x.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
     std::io::Write::write_all(&mut tmp, bytes)?;
     tmp.as_file().sync_all()?;
