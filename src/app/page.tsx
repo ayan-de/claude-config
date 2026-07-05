@@ -197,7 +197,7 @@ export default function Page() {
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <span
                       className={cn(
-                        "text-[10px] font-medium px-2.5 py-0.5 rounded-full border select-none transition-all duration-150",
+                        "text-[10px] font-medium px-2.5 py-0.5 rounded-sm border select-none transition-all duration-150",
                         loadingId
                           ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
                           : "bg-primary/10 text-primary border-primary/20",
