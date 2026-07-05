@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  ExternalLink,
   KeyRound,
   Loader2,
   Lock,
@@ -34,6 +35,7 @@ import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
 import {
   CUSTOM_SENTINEL,
   PRESET_PROVIDERS,
+  getPresetApiKeyUrl,
 } from "@/lib/presetProviders";
 import { importCurrentSubscription } from "@/lib/api";
 import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
@@ -726,6 +728,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
   if (editing) {
     const preset = PRESET_PROVIDERS.find((p) => p.id === f.selectedPresetId);
     const label = preset?.name ?? "Custom";
+    const apiKeyUrl = getPresetApiKeyUrl(f.selectedPresetId);
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2.5 rounded-lg border bg-muted/20 p-2.5">
@@ -753,6 +756,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="authToken">Auth token</Label>
+          {apiKeyUrl && <PresetApiKeyHint url={apiKeyUrl} />}
           <SecretInput
             id="authToken"
             value={f.authToken}
@@ -882,6 +886,9 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
       {/* Auth token */}
       <div className="space-y-1.5">
         <Label htmlFor="authToken">Auth token</Label>
+        {getPresetApiKeyUrl(f.selectedPresetId) && (
+          <PresetApiKeyHint url={getPresetApiKeyUrl(f.selectedPresetId)!} />
+        )}
         <SecretInput
           id="authToken"
           value={f.authToken}
@@ -897,5 +904,27 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Inline hint under the Auth token field for presets that publish a self-serve
+ * API-key dashboard. Renders the full URL so it is visible — the user pastes
+ * the link into their browser themselves.
+ */
+function PresetApiKeyHint({ url }: { url: string }) {
+  return (
+    <p className="text-[10px] text-muted-foreground">
+      Grab your free API key from{" "}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 break-all font-mono font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        {url}
+        <ExternalLink className="size-2.5 shrink-0 -translate-y-px" />
+      </a>
+    </p>
   );
 }

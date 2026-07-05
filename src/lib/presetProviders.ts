@@ -8,6 +8,9 @@ import type { Provider } from "./types";
  *   1. Append an entry to PRESET_PROVIDERS.
  *   2. Drop the matching SVG at `public/logos/<id>.svg` using
  *      `currentColor` on primary shapes so it themes via the wrapper.
+ *   3. If the provider exposes a self-serve dashboard for grabbing an API
+ *      key, set `apiKeyUrl` so the form can show a "Grab your free API key
+ *      from here" hint under the auth-token field.
  *
  * The "+ Custom" option in the dropdown uses CUSTOM_SENTINEL as its value —
  * it tells the form to clear preset state and let the user define a provider
@@ -22,6 +25,9 @@ export interface PresetProvider {
   baseUrl: string;
   /** Path under /public for the bundled SVG asset. */
   logoPath: string;
+  /** Link to a self-serve dashboard where the user can grab an API key.
+   *  Surfaced in the form under the auth-token field when set. */
+  apiKeyUrl?: string;
 }
 
 export const PRESET_PROVIDERS: readonly PresetProvider[] = [
@@ -60,20 +66,30 @@ export const PRESET_PROVIDERS: readonly PresetProvider[] = [
     name: "freemodel",
     baseUrl: "https://cc.freemodel.dev",
     logoPath: "/logos/freemodel.svg",
+    apiKeyUrl: "https://freemodel.dev/dashboard/keys",
   },
   {
     id: "aerolink",
     name: "aerolink",
     baseUrl: "https://capi.aerolink.lat/",
     logoPath: "/logos/aerolink.svg",
+    apiKeyUrl: "https://aerolink.lat/dashboard/api-keys",
   },
   {
     id: "zenmux",
     name: "zenmux",
     baseUrl: "https://zenmux.ai/api/anthropic",
     logoPath: "/logos/zenmux.svg",
+    apiKeyUrl: "https://zenmux.ai/platform/pay-as-you-go",
   },
 ] as const;
+
+/** Look up the API-key dashboard URL for a preset id. Returns undefined
+ *  when the preset has no self-serve link or doesn't exist. */
+export function getPresetApiKeyUrl(id: string | null): string | undefined {
+  if (!id || id === CUSTOM_SENTINEL) return undefined;
+  return PRESET_PROVIDERS.find((p) => p.id === id)?.apiKeyUrl;
+}
 
 /** Sentinel value for the "+ Custom" option in the preset dropdown. */
 export const CUSTOM_SENTINEL = "__custom__";
