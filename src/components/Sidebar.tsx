@@ -66,33 +66,46 @@ export function Sidebar({
         content: (
           <div className="flex flex-col gap-2.5">
             {providers.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-4 text-center">
+              <div className="flex flex-col items-center gap-2.5 rounded-lg border border-dashed p-4 text-center">
                 <p className="text-[10px] text-muted-foreground">
                   No providers configured
                 </p>
                 <Button
                   size="xs"
-                  variant="outline"
+                  variant="default"
                   onClick={onNewProvider}
-                  className="mt-2.5 cursor-pointer w-full text-[10px] h-6"
+                  title="New provider"
+                  className="cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
                 >
                   <Plus className="size-3" />
-                  Add Provider
+                  New
                 </Button>
               </div>
             ) : (
-              providers.map((p) => (
-                <ProviderCard
-                  key={p.id}
-                  provider={p}
-                  isActive={p.id === activeProviderId}
-                  isSelected={!showEditor && p.id === editingProviderId}
-                  isLoading={p.id === loadingProviderId}
-                  onSelect={() => onSelectProvider(p.id)}
-                  onLoad={() => onLoadProvider(p.id)}
-                  onDelete={() => onDeleteProvider(p.id)}
-                />
-              ))
+              <>
+                {providers.map((p) => (
+                  <ProviderCard
+                    key={p.id}
+                    provider={p}
+                    isActive={p.id === activeProviderId}
+                    isSelected={!showEditor && p.id === editingProviderId}
+                    isLoading={p.id === loadingProviderId}
+                    onSelect={() => onSelectProvider(p.id)}
+                    onLoad={() => onLoadProvider(p.id)}
+                    onDelete={() => onDeleteProvider(p.id)}
+                  />
+                ))}
+                <Button
+                  size="xs"
+                  variant="default"
+                  onClick={onNewProvider}
+                  title="New provider"
+                  className="cursor-pointer self-center dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
+                >
+                  <Plus className="size-3" />
+                  New
+                </Button>
+              </>
             )}
           </div>
         ),
