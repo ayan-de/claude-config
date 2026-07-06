@@ -10,6 +10,14 @@ interface LoopVideoProps {
   className?: string;
 }
 
+function withWebMFallback(src: string): { webm?: string; original: string } {
+  const m = src.match(/^(.*)\.([^.]+)$/);
+  if (!m) return { original: src };
+  const [, base, ext] = m;
+  if (ext.toLowerCase() === "mp4") return { webm: `${base}.webm`, original: src };
+  return { original: src };
+}
+
 export function LoopVideo({
   src,
   fallbackSrc,
@@ -18,9 +26,11 @@ export function LoopVideo({
 }: LoopVideoProps) {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const reduceMotion = useReducedMotion();
+  const [failed, setFailed] = React.useState(false);
+  const sources = React.useMemo(() => withWebMFallback(src), [src]);
 
   React.useEffect(() => {
-    if (reduceMotion) return;
+    if (reduceMotion || failed) return;
     const v = videoRef.current;
     if (!v) return;
 
@@ -52,9 +62,9 @@ export function LoopVideo({
       v.removeEventListener("timeupdate", onTimeUpdate);
       v.removeEventListener("pause", onPause);
     };
-  }, [reduceMotion]);
+  }, [reduceMotion, failed]);
 
-  if (reduceMotion && fallbackSrc) {
+  if ((reduceMotion || failed) && fallbackSrc) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -68,14 +78,18 @@ export function LoopVideo({
   return (
     <video
       ref={videoRef}
-      src={src}
       autoPlay
       muted
+      loop
       playsInline
       preload="auto"
       aria-label={alt || undefined}
+      onError={() => setFailed(true)}
       className={cn("select-none", className)}
-    />
+    >
+      {sources.webm && <source src={sources.webm} type="video/webm" />}
+      <source src={sources.original} />
+    </video>
   );
 }
 
