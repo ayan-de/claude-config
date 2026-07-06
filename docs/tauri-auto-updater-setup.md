@@ -4,7 +4,7 @@ Reference for wiring `tauri-plugin-updater` into a Tauri 2 desktop app so
 installed clients pull signed updates from GitHub Releases automatically.
 
 The gotchas are all things I hit while shipping `claude-config` v0.4.0 →
-v0.5.4. Skip past them by following the steps in order.
+v0.5.6. Skip past them by following the steps in order.
 
 ---
 
@@ -152,6 +152,17 @@ Paste that single line. It should look like:
 
 ## Step 3 — GitHub Actions release workflow
 
+**Do not use a single matrix job with `releaseDraft: true`.** Each matrix
+runner will race to create its own release for the same tag, and you'll end
+up with two or three separate releases per version — one per platform that
+won the create call. See Failure #4 below for what this looks like in
+practice.
+
+The correct shape is three jobs: **create-release → build (matrix) →
+publish-release**. The create job produces a single draft, the matrix jobs
+all upload to *that* draft via `releaseId`, and the publish job flips
+`draft: false` after everything lands.
+
 `.github/workflows/release.yml`:
 
 ```yaml
@@ -167,8 +178,43 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read package version
+        run: echo "PACKAGE_VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+      - name: Create draft release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = `v${process.env.PACKAGE_VERSION}`;
+            // Reuse an existing draft for the tag (re-runs on same tag).
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const existing = releases.data.find(r => r.tag_name === tag && r.draft);
+            if (existing) return existing.id;
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `My App ${tag}`,
+              body: "See assets below.",
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
   build:
     name: Build ${{ matrix.platform.name }}
+    needs: create-release
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
@@ -195,26 +241,51 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build & release
-        uses: tauri-apps/tauri-action@v1
+      - name: Build & upload
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "My App ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.platform.tauri-args }}
+
+  publish-release:
+    name: Publish release
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.release_id),
+              draft: false,
+              prerelease: false,
+            });
 ```
 
-### Why `@v1` and not `@v0`
+### Why `releaseId` instead of `tagName` + `releaseDraft`
 
-`tauri-action@v0` (still on v0.6.2 at time of writing) has bugs around
-macOS `.app.tar.gz` re-packaging and updater artifact handling. `@v1.0.0`
-(released 2026-06-29) is the first release cleanly supporting Tauri 2's
-updater flow. Use `@v1` unless you're stuck on Tauri v1.
+When multiple matrix jobs pass `tagName` + `releaseDraft: true` to
+`tauri-action`, they race: whichever one wins the `createRelease` API call
+gets the assets, and the others create their own duplicate release. With
+`releaseId`, every job uploads to the same release, and tauri-action's
+built-in `latest.json` merger keeps signatures for previously-uploaded
+platforms instead of overwriting them.
+
+### tauri-action version
+
+`tauri-apps/tauri-action@v0` is the current stable major (v0.5.x releases
+throughout 2025-2026). It cleanly supports Tauri 2's updater flow and
+the `releaseId` input. If you previously used `@v1` (an alias that briefly
+existed), migrate to `@v0` — that's the tag the maintainers publish
+against.
 
 ---
 
@@ -298,10 +369,11 @@ git tag vX.Y.Z
 git push origin master vX.Y.Z
 ```
 
-The tag push triggers the workflow. It creates a **draft** release, uploads
-all installers + `.sig` files + `latest.json`, then you publish it manually
-from the Releases page (this gives you a chance to sanity-check assets
-before it goes live).
+The tag push triggers the workflow. `create-release` produces a draft,
+the matrix jobs upload all installers + `.sig` files + `latest.json` to
+it, and `publish-release` flips it to non-draft once every platform
+finishes. No manual publish step — but if a platform build fails, the
+release stays draft so you can either re-run the failed job or discard.
 
 ---
 
@@ -382,6 +454,40 @@ anything because the config didn't ask it to.
 `tauri.conf.json`. This is the single line that flips the bundler into
 signing mode.
 
+### 4. Matrix jobs race and split the release in two (v0.5.5)
+
+**Symptom**: All three build jobs report success. The published release
+has macOS + Windows artifacts but no Linux ones, and `latest.json`'s
+`platforms` object is missing `linux-x86_64`. Meanwhile a second, still-
+draft release for the same tag holds the Linux `.deb` / `.rpm` /
+`.AppImage` files. Client on Linux hits:
+
+```
+Update check failed: None of the fallback platforms ["linux-x86_64"] were
+found in the response `platforms` object
+```
+
+**Root cause**: Every matrix job called `tauri-action` with
+`releaseDraft: true` + `tagName`. Each one tried to create the release
+for that tag; whichever platform's create call landed second created a
+duplicate. The Linux job's release was left as draft (and never
+promoted), and the published one was whatever platform GitHub happened
+to make "Latest" — with only that platform's `latest.json`.
+
+**Fix**: Split into `create-release` → `build (matrix)` → `publish-release`
+as shown in Step 3. All matrix jobs use `releaseId`, so uploads land on
+the same release and tauri-action merges `latest.json` platforms instead
+of overwriting.
+
+**Cleanup**: The orphan draft has to be deleted by hand — GitHub does
+not garbage-collect duplicate drafts on tag reuse.
+
+```bash
+gh api repos/<owner>/<repo>/releases | \
+  jq -r '.[] | select(.tag_name=="vX.Y.Z" and .draft) | .id'
+gh api repos/<owner>/<repo>/releases/<id> --method DELETE
+```
+
 ---
 
 ## Debugging cheat sheet
@@ -393,6 +499,8 @@ signing mode.
 | `latest.json` exists but client says "no updates" | Client is on the same or newer version; or its baked-in `pubkey` mismatches the manifest signature |
 | Client throws `UnexpectedKeyId` | Signing key was regenerated between builds; the installed client's pubkey doesn't match the new signatures |
 | Windows client shows update but install silently fails | Missing capability permission or `installMode` misconfigured; check `capabilities/default.json` |
+| `None of the fallback platforms ["linux-x86_64"] were found` | `latest.json`'s `platforms` is missing that key — either the matrix job never uploaded (check `gh run view <id> --json jobs`) or another matrix job overwrote it (Failure #4). Also check for a duplicate draft release holding the missing artifacts. |
+| Two releases exist for the same tag (one draft, one published) | Matrix race from Step 3 — you're still on the old single-job workflow. Migrate to create-release → build → publish-release. |
 
 ---
 
@@ -411,3 +519,7 @@ signing mode.
 - **The client updates itself, but only for the next version.** The
   currently-installed version is what runs `check()`. Any fix to updater
   configuration only helps releases *after* the fix ships to users.
+- **Never let matrix jobs create the release.** One `create-release` job
+  first, matrix jobs upload via `releaseId`, one `publish-release` job at
+  the end. Any other shape races — silently on happy paths, catastrophically
+  when it doesn't.
