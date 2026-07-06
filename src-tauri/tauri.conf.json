@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Claude Config",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "identifier": "com.claudeconfig.app",
   "build": {
     "frontendDist": "../out",
@@ -46,7 +46,7 @@
       "endpoints": [
         "https://github.com/ayan-de/claude-config/releases/latest/download/latest.json"
       ],
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3MDE4MTM3NUYzMjU3Q0EKUldUS1Z6SmZONEVCZHo0Z1JMTWhJZnJwNFN3QTlFMXVrVHNEUUNJaDFRQUtnRDA1eEpZbHpJZ1MK",
       "windows": {
         "installMode": "passive"
       }
