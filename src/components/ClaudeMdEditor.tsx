@@ -48,7 +48,7 @@ export function ClaudeMdSidebarButton({
   const exists = useClaudeMdExists();
   const loaded = exists !== null;
   const label = loaded && !exists ? "+ Add CLAUDE.md" : "CLAUDE.md";
-  const Icon = loaded && !exists ? FilePlus : FileText;
+  const showAddIcon = loaded && !exists;
   return (
     <button
       onClick={onSelect}
@@ -59,14 +59,36 @@ export function ClaudeMdSidebarButton({
           : "bg-card/50 border-border/60 text-muted-foreground hover:bg-card hover:border-foreground/20 hover:text-foreground",
       )}
     >
-      <Icon
-        className={cn(
-          "size-3.5 shrink-0",
-          active
-            ? "text-primary"
-            : "text-muted-foreground group-hover:text-foreground",
-        )}
-      />
+      {showAddIcon ? (
+        <FilePlus
+          className={cn(
+            "size-3.5 shrink-0",
+            active
+              ? "text-primary"
+              : "text-muted-foreground group-hover:text-foreground",
+          )}
+        />
+      ) : (
+        <span
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 bg-current",
+            active
+              ? "text-primary"
+              : "text-muted-foreground group-hover:text-foreground",
+          )}
+          style={{
+            WebkitMaskImage: "url(/logos/claude.svg)",
+            maskImage: "url(/logos/claude.svg)",
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+            maskPosition: "center",
+            WebkitMaskSize: "contain",
+            maskSize: "contain",
+          }}
+        />
+      )}
       <span className="flex-1 truncate">{label}</span>
     </button>
   );
