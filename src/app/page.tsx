@@ -84,6 +84,7 @@ export default function Page() {
               appDataDir={providers.appDataDir}
               claudeDir={providers.claudeDir}
               updateAvailable={updater.available}
+              updateError={updater.error}
               onRevealAppDir={providers.handleRevealAppDir}
               onRevealClaudeDir={providers.handleRevealClaudeDir}
               onExport={providers.handleExport}

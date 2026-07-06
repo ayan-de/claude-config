@@ -23,6 +23,7 @@ interface Props {
   appDataDir: string | null;
   claudeDir: string | null;
   updateAvailable: boolean;
+  updateError: string | null;
   onRevealAppDir: () => void;
   onRevealClaudeDir: () => void;
   onExport: (includeSecrets: boolean) => void;
@@ -34,6 +35,7 @@ export function SettingsMenu({
   appDataDir,
   claudeDir,
   updateAvailable,
+  updateError,
   onRevealAppDir,
   onRevealClaudeDir,
   onExport,
@@ -101,7 +103,17 @@ export function SettingsMenu({
             <RefreshCw />
             <span className="flex-1">Check for updates</span>
             {updateAvailable && (
-              <span className="ml-2 size-2 shrink-0 rounded-full bg-red-500" />
+              <span
+                className="ml-2 size-2 shrink-0 rounded-full bg-red-500"
+                aria-label="update available"
+              />
+            )}
+            {!updateAvailable && updateError && (
+              <span
+                className="ml-2 size-2 shrink-0 rounded-full bg-amber-500"
+                aria-label="update check failed"
+                title={updateError}
+              />
             )}
           </DropdownMenuItem>
         </DropdownMenuGroup>

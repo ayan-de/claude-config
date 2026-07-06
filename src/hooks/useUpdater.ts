@@ -39,34 +39,35 @@ export function useUpdater(): UpdaterState & UpdaterActions {
   const updateRef = useRef<Update | null>(null);
 
   const runCheck = useCallback(async (showToastOnError: boolean) => {
-    if (!isWebEnv()) {
-      try {
-        const u = await check();
-        if (u) {
-          updateRef.current = u;
-          setVersion(u.version);
-          setAvailable(true);
-          setDismissed(false);
-          toast.info(`Update available: v${u.version}`, {
-            description: "Click Update to install.",
-            duration: 8000,
-          });
-        } else {
-          setAvailable(false);
-          setVersion(null);
-          updateRef.current = null;
-          if (showToastOnError) {
-            toast.success("You're up to date");
-          }
-        }
-        setError(null);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+    // isWebEnv() returns TRUE when running inside Tauri (checks
+    // __TAURI_INTERNALS__). The updater plugin is only available there.
+    if (!isWebEnv()) return;
+    try {
+      const u = await check();
+      if (u) {
+        updateRef.current = u;
+        setVersion(u.version);
+        setAvailable(true);
+        setDismissed(false);
+        toast.info(`Update available: v${u.version}`, {
+          description: "Click Update to install.",
+          duration: 8000,
+        });
+      } else {
+        setAvailable(false);
+        setVersion(null);
+        updateRef.current = null;
         if (showToastOnError) {
-          toast.error(`Update check failed: ${msg}`);
+          toast.success("You're up to date");
         }
       }
+      setError(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[updater] check failed:", e);
+      setError(msg);
+      // Always surface — silent failure was hiding a real config bug from users.
+      toast.error(`Update check failed: ${msg}`, { duration: 10000 });
     }
   }, []);
 
