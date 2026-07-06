@@ -7,7 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
-use crate::storage::discover_claude_dir;
+use crate::storage::{discover_claude_dir, scan_marketplaces, MarketplaceSummary};
 
 /// Returns the path Claude Code reads `settings.json` from. Respects the
 /// `CLAUDE_CONFIG_DIR` env var.
@@ -80,4 +80,12 @@ pub fn write_claude_md_cmd(
 #[tauri::command]
 pub fn claude_md_exists_cmd() -> bool {
     claude_md_path().exists()
+}
+
+/// Scans `<claude_dir>/plugins/marketplaces/*` and returns one summary per
+/// known marketplace. The Add flow itself is deferred — this command lets
+/// the UI populate the marketplace list. Honors `CLAUDE_CONFIG_DIR`.
+#[tauri::command]
+pub fn list_marketplaces_cmd() -> AppResult<Vec<MarketplaceSummary>> {
+    scan_marketplaces(&discover_claude_dir())
 }

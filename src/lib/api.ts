@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   KeyringStatus,
+  MarketplaceSummary,
   Provider,
   ProviderInput,
 } from "./types";
@@ -43,6 +44,14 @@ export const readClaudeMd = () => call<string | null>("read_claude_md_cmd");
 export const writeClaudeMd = (content: string) =>
   call<void>("write_claude_md_cmd", { content });
 export const claudeMdExists = () => call<boolean>("claude_md_exists_cmd");
+
+/**
+ * Lists registered marketplaces from
+ * &lt;claude_dir&gt;/plugins/marketplaces/<name>/.claude-plugin/marketplace.json.
+ * Returns an empty array when no marketplaces are installed yet.
+ */
+export const listMarketplaces = () =>
+  call<MarketplaceSummary[]>("list_marketplaces_cmd");
 
 // ---------- providers ----------
 

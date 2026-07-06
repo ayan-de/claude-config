@@ -1,12 +1,16 @@
 "use client";
 
-import { FileText, type LucideIcon } from "lucide-react";
+import { FileText, Store, type LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
   ClaudeMdEditor,
   ClaudeMdSidebarButton,
 } from "@/components/ClaudeMdEditor";
+import {
+  MarketplaceSidebarButton,
+  MarketplaceView,
+} from "@/components/Marketplace";
 
 export interface GlobalTabProps {
   /** Called when the tab wants to close itself (e.g. Cancel / back button). */
@@ -49,6 +53,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Give global instructions to Claude Code from here. These rules apply across all repositories you run Claude Code in.",
     SidebarButton: ClaudeMdSidebarButton,
     Component: ClaudeMdEditor,
+  },
+  {
+    id: "marketplace",
+    label: "Marketplace",
+    icon: Store,
+    tooltip:
+      "Browse registries of plugins, skills, and commands contributed for Claude Code.",
+    SidebarButton: MarketplaceSidebarButton,
+    Component: MarketplaceView,
   },
 ];
 

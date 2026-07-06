@@ -129,3 +129,21 @@ export const isSubscription = (p: Provider): p is Extract<Provider, { kind: "sub
   p.kind === "subscription";
 export const isConsole = (p: Provider): p is Extract<Provider, { kind: "console" }> =>
   p.kind === "console";
+
+/**
+ * Row in the Marketplace list. Mirrors `MarketplaceSummary` in
+ * `src-tauri/src/storage/marketplaces.rs`. Each registered marketplace is
+ * one row — read-only display for now; add/remove is deferred.
+ */
+export interface MarketplaceSummary {
+  /** Display name (from manifest, falls back to dir name). */
+  name: string;
+  /** Author name from manifest.owner.name, empty if absent. */
+  owner: string;
+  /** Short description from manifest.metadata.description. */
+  description: string;
+  /** Number of `plugins[]` entries in the manifest. */
+  plugin_count: number;
+  /** Diagnostic — path of the manifest file we read this row from. */
+  source: string;
+}
