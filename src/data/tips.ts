@@ -1,0 +1,16 @@
+export const TIPS: string[] = [
+  "Changing provider may require a Claude Code restart to take effect.",
+  "Add a CLAUDE.md file to your project root to give Claude Code persistent context about your codebase, conventions, and preferences.",
+  "Use /agents to create specialized subagents (like a code reviewer or debugger) that Claude Code can delegate tasks to automatically.",
+  "Press Shift+Tab to cycle into Plan Mode, so Claude can analyze and propose an approach before making any changes.",
+  "Claude Code can resume previous conversations, so you don't lose context between sessions.",
+  "Use Git worktrees to run multiple parallel Claude Code sessions on the same repo without them stepping on each other.",
+  "Custom slash commands let you save frequently-used prompts as reusable shortcuts — great for repeated workflows.",
+  "Hooks (like PreToolUse and Stop) let you run scripts automatically at key points in a Claude Code session, useful for auto-formatting, logging, or syncing state.",
+  "Pipe input and output through Claude Code to use it as a unix-style utility in scripts and CI pipelines.",
+  "Reference files and directories directly in your prompt using @ to give Claude precise context instead of describing them.",
+  "Skills are reusable, file-based instructions Claude Code can load on demand — handy for enforcing team-specific conventions.",
+  "Extended thinking gives Claude more room to reason through complex refactors or architecture decisions before responding.",
+  "MCP servers let Claude Code connect to external tools and data sources — useful if your workflow spans multiple services.",
+  "You can ask Claude Code directly about its own capabilities — it can fetch its own docs to answer accurately.",
+];

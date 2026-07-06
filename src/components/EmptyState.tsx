@@ -4,6 +4,7 @@ import * as React from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoopVideo } from "@/components/LoopVideo";
+import { Tips } from "./Tips";
 
 interface Props {
   hasProviders: boolean;
@@ -41,6 +42,9 @@ export function EmptyState({ hasProviders, onNew }: Props) {
             <Plus className="size-3.5" />
             New provider
           </Button>
+          <div className="pt-2">
+            <Tips />
+          </div>
         </div>
       </div>
     );
