@@ -4,7 +4,7 @@ Reference for wiring `tauri-plugin-updater` into a Tauri 2 desktop app so
 installed clients pull signed updates from GitHub Releases automatically.
 
 The gotchas are all things I hit while shipping `claude-config` v0.4.0 →
-v0.5.3. Skip past them by following the steps in order.
+v0.5.4. Skip past them by following the steps in order.
 
 ---
 
