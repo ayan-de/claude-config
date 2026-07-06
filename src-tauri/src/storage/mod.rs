@@ -1,3 +1,4 @@
+pub mod claude_md;
 pub mod credentials;
 pub mod keyring;
 pub mod providers;

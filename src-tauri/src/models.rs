@@ -320,6 +320,9 @@ pub enum AppError {
     #[error("Settings file at {path} is malformed: {message}")]
     MalformedSettings { path: String, message: String },
 
+    #[error("CLAUDE.md file at {path} is malformed: {message}")]
+    MalformedClaudeMd { path: String, message: String },
+
     #[error("Failed to acquire lock on settings file")]
     Lock(String),
 
@@ -338,6 +341,7 @@ impl AppError {
             AppError::Keyring(_) => "keyring",
             AppError::KeyringUnavailable(_) => "keyring_unavailable",
             AppError::MalformedSettings { .. } => "malformed_settings",
+            AppError::MalformedClaudeMd { .. } => "malformed_claude_md",
             AppError::Lock(_) => "lock",
             AppError::Internal(_) => "internal",
         }

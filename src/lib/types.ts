@@ -112,6 +112,7 @@ export interface AppError {
     | "keyring"
     | "keyring_unavailable"
     | "malformed_settings"
+    | "malformed_claude_md"
     | "lock"
     | "internal";
   message: string;

@@ -39,6 +39,10 @@ export const discoverClaudeDir = () => call<string>("discover_claude_dir_cmd");
 export const getAppDataDir = () => call<string>("get_app_data_dir_cmd");
 export const revealInFileManager = (path: string) =>
   call<void>("reveal_in_file_manager_cmd", { path });
+export const readClaudeMd = () => call<string | null>("read_claude_md_cmd");
+export const writeClaudeMd = (content: string) =>
+  call<void>("write_claude_md_cmd", { content });
+export const claudeMdExists = () => call<boolean>("claude_md_exists_cmd");
 
 // ---------- providers ----------
 
