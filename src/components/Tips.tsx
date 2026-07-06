@@ -15,6 +15,7 @@ export function Tips() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHidden(localStorage.getItem(STORAGE_KEY) === "true");
     }
   }, []);
