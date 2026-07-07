@@ -9,6 +9,9 @@ import type {
   Provider,
   ProviderInput,
   SkillSummary,
+  TrackerConfigView,
+  TrackerSourceDescriptor,
+  TrackerUsage,
 } from "./types";
 
 interface RawError {
@@ -125,3 +128,43 @@ export const exportProviders = (
 ) => call<void>("export_providers_cmd", { dest, includeSecrets });
 export const importProviders = (src: string, secretsSrc?: string) =>
   call<number>("import_providers_cmd", { src, secretsSrc });
+
+// ---------- tracker ----------
+//
+// Per-provider usage tracking. The flow is:
+//   1. listTrackerSources() — fetch the source catalog once at mount.
+//   2. getTrackerConfig(providerId) — read saved config + cached usage.
+//   3. saveTrackerConfig(providerId, source, fields) — validate + persist.
+//   4. refreshTracker(providerId) — fetch a fresh usage snapshot.
+//   5. getTrackerUsage(providerId) — read the cached snapshot only.
+//   6. deleteTrackerConfig(providerId) — clean up.
+//
+// Secrets are split out by the backend into the OS keyring; the UI never
+// sees them on read. On save the UI sends whatever the user typed (empty
+// = "leave existing keyring entry alone").
+
+export const listTrackerSources = () =>
+  call<TrackerSourceDescriptor[]>("list_tracker_sources_cmd");
+
+export const getTrackerConfig = (providerId: string) =>
+  call<TrackerConfigView>("get_tracker_config_cmd", { providerId });
+
+export const saveTrackerConfig = (
+  providerId: string,
+  source: string,
+  fields: Record<string, unknown>,
+) =>
+  call<TrackerConfigView>("save_tracker_config_cmd", {
+    providerId,
+    source,
+    fields,
+  });
+
+export const deleteTrackerConfig = (providerId: string) =>
+  call<void>("delete_tracker_config_cmd", { providerId });
+
+export const refreshTracker = (providerId: string) =>
+  call<TrackerUsage>("refresh_tracker_cmd", { providerId });
+
+export const getTrackerUsage = (providerId: string) =>
+  call<TrackerUsage | null>("get_tracker_usage_cmd", { providerId });

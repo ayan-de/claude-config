@@ -12,6 +12,8 @@ import {
   Loader2,
   Lock,
   Plus,
+  Settings2,
+  Sparkles,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { LoopVideo } from "@/components/LoopVideo";
+import { TrackerTab } from "@/components/TrackerTab";
 import { cn } from "@/lib/utils";
 import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
 import {
@@ -40,6 +43,13 @@ import {
 import { importCurrentSubscription } from "@/lib/api";
 import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
 import { useProviderForm } from "@/hooks/useProviderForm";
+
+/**
+ * The two tabs in the ProviderForm. "Tracker" only renders when
+ * `editing` is non-null — the tracker is per-existing-provider, so
+ * there's nothing to track during the create flow.
+ */
+type ProviderFormTab = "configuration" | "tracker";
 
 interface Props {
   editing: Provider | null;
@@ -96,6 +106,10 @@ export function ProviderForm({
   const [selectedKind, setSelectedKind] = useState<ProviderKind | null>(
     editing?.kind ?? null,
   );
+  // Tab state — only meaningful when editing. Resets to "configuration"
+  // whenever the editing target changes (key on <ProviderForm> in Main
+  // already handles that, but we also reset on kind changes for safety).
+  const [tab, setTab] = useState<ProviderFormTab>("configuration");
   const [importing, setImporting] = useState(false);
   const [modelsExpanded, setModelsExpanded] = useState(() => {
     if (!editing) return false;
@@ -181,6 +195,8 @@ export function ProviderForm({
       onCancel={onCancel}
       onSave={onSave}
       isSaving={isSaving}
+      tab={tab}
+      setTab={setTab}
     />
   );
 }
@@ -199,6 +215,8 @@ interface KindFormProps {
   onCancel: () => void;
   onSave: (input: ProviderInput) => Promise<void>;
   isSaving: boolean;
+  tab: ProviderFormTab;
+  setTab: (t: ProviderFormTab) => void;
 }
 
 function KindForm({
@@ -215,6 +233,8 @@ function KindForm({
   onCancel,
   onSave,
   isSaving,
+  tab,
+  setTab,
 }: KindFormProps) {
   const f = useProviderForm({ editing, kind, onSave, isSaving });
 
@@ -280,7 +300,20 @@ function KindForm({
           </div>
         )}
       </CardHeader>
+      {editing && (
+        <FormTabs tab={tab} setTab={setTab} />
+      )}
       <CardContent>
+        {editing && tab === "tracker" ? (
+          <TrackerTab
+            providerId={editing.id}
+            providerName={editing.name}
+            providerKind={editing.kind}
+            providerBaseUrl={
+              editing.kind === "custom" ? editing.base_url : null
+            }
+          />
+        ) : (
         <form onSubmit={f.handleSubmit} className="space-y-5">
           {/* ---------- Kind-specific fields ---------- */}
 
@@ -657,6 +690,7 @@ function KindForm({
             )}
           </div>
         </form>
+        )}
       </CardContent>
     </Card>
   );
@@ -670,6 +704,68 @@ interface SecretInputProps {
   setShow: (b: boolean) => void;
   placeholder?: string;
   error: string | null;
+}
+
+/**
+ * Sub-tab bar inside the ProviderForm Card. Only rendered when `editing`
+ * is set — the create flow has no tracker to manage. The "Close" button
+ * is intentionally outside the tabs so the user always has a way to
+ * dismiss the modal, regardless of which tab is active.
+ */
+function FormTabs({
+  tab,
+  setTab,
+}: {
+  tab: ProviderFormTab;
+  setTab: (t: ProviderFormTab) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-border/40 px-5 py-1.5">
+      <div className="flex items-center gap-1">
+        <TabButton
+          active={tab === "configuration"}
+          onClick={() => setTab("configuration")}
+          icon={<Settings2 className="size-3.5" />}
+          label="Configuration"
+        />
+        <TabButton
+          active={tab === "tracker"}
+          onClick={() => setTab("tracker")}
+          icon={<Sparkles className="size-3.5" />}
+          label="Tracker"
+        />
+      </div>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-t-md border-b-2 px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+      )}
+      aria-pressed={active}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 function SecretInput({

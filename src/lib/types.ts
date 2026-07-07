@@ -224,3 +224,98 @@ export interface McpServerSummary {
   /** Diagnostic — the path the row was read from. */
   source: string;
 }
+
+// ---------------------------------------------------------------------------
+// Tracker (per-provider usage tracking)
+// ---------------------------------------------------------------------------
+
+/**
+ * Form field declared by a tracker source. Mirrors `TrackerField` in
+ * `src-tauri/src/tracker/mod.rs`. The UI renders one input per field
+ * based on these properties — no per-source special-casing.
+ */
+export interface TrackerField {
+  /** JSON key the value is stored under. */
+  key: string;
+  label: string;
+  placeholder: string;
+  /** `true` for keys/cookies — value goes to OS keyring, not the JSON
+   *  config blob. The UI masks the input and shows a "Stored" hint
+   *  when the backend reports a value is already present. */
+  secret: boolean;
+  /** Multiline text input (ManualJson's `payload` field). */
+  multiline: boolean;
+  required: boolean;
+  hint: string | null;
+}
+
+/**
+ * One registered tracker source. Mirrors `SourceDescriptor` in
+ * `src-tauri/src/tracker/mod.rs`. The UI calls `listTrackerSources` once
+ * to get this list and renders the source picker from it.
+ */
+export interface TrackerSourceDescriptor {
+  id: string;
+  display_name: string;
+  description: string;
+  fields: TrackerField[];
+  /**
+   * Provider kinds this source applies to. The UI uses this to filter
+   * the picker and to show a "coming soon" panel when no source
+   * matches the current provider's kind. Mirrors
+   * `TrackerSource::applicable_kinds` in Rust.
+   */
+  applicable_kinds: string[];
+}
+
+/**
+ * One quota window in a usage snapshot. All sources normalize to this
+ * shape regardless of their native API.
+ */
+export interface TrackerUsageWindow {
+  label: string;
+  used: number | null;
+  limit: number | null;
+  /** 0..100. The UI uses this directly in the progress bar; when null
+   *  it falls back to `used / limit * 100`. */
+  used_percent: number | null;
+  unit: string | null;
+  resets_at: string | null;
+  reset_label: string | null;
+}
+
+export interface TrackerModelUsage {
+  model: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: number | null;
+}
+
+/**
+ * Normalized output every source returns. The UI doesn't care which
+ * source produced it.
+ */
+export interface TrackerUsage {
+  windows: TrackerUsageWindow[];
+  models: TrackerModelUsage[];
+  cost_usd: number | null;
+  fetched_at: string;
+  note: string | null;
+}
+
+/**
+ * The saved tracker config returned to the UI. `fields` excludes any
+ * secret values (they live in the keyring); `has_secret` tells the UI
+ * which keys have a stored value so the form can show "Stored" instead
+ * of an empty placeholder.
+ */
+export interface TrackerConfigView {
+  source: string;
+  /** Non-secret fields only. */
+  fields: Record<string, unknown>;
+  last_usage: TrackerUsage | null;
+  last_fetched_at: string | null;
+  last_error: string | null;
+  updated_at: string;
+  has_secret: string[];
+}
