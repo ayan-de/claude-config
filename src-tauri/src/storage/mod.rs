@@ -4,6 +4,7 @@ pub mod keyring;
 pub mod marketplaces;
 pub mod providers;
 pub mod settings;
+pub mod permissions;
 
 #[allow(unused_imports)] // credentials_path is used by tests + future UI surfacing
 pub use credentials::{credentials_path, read_credentials_oauth, write_credentials_oauth};
