@@ -28,7 +28,10 @@ export function DangerousModeConfirm({ open, onConfirm, onCancel }: Props) {
             <AlertTriangle className="size-4 text-amber-500" />
             Enable dangerous mode?
           </DialogTitle>
-          <DialogDescription className="space-y-3 pt-2 text-sm">
+          <DialogDescription
+            render={<div />}
+            className="space-y-3 pt-2 text-sm"
+          >
             <p>
               Claude Code will run without asking permission for{" "}
               <strong>any</strong> file write or shell command.
