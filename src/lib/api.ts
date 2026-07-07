@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   KeyringStatus,
   MarketplaceSummary,
+  McpServerSummary,
   Provider,
   ProviderInput,
   SkillSummary,
@@ -61,6 +62,16 @@ export const listMarketplaces = () =>
  * Returns an empty array when no skills are installed yet.
  */
 export const listSkills = () => call<SkillSummary[]>("list_skills_cmd");
+
+/**
+ * Lists MCP servers Claude Code connects to, from the top-level
+ * `mcpServers` object in `~/.claude.json`, enriched with the health
+ * and needs-auth caches. Mirrors `scan_mcp_servers` in
+ * `src-tauri/src/storage/mcp.rs`. Returns an empty array when no
+ * servers are configured.
+ */
+export const listMcpServers = () =>
+  call<McpServerSummary[]>("list_mcp_servers_cmd");
 
 // ---------- providers ----------
 

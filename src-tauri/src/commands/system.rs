@@ -7,7 +7,10 @@ use tauri_plugin_opener::OpenerExt;
 use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
-use crate::storage::{discover_claude_dir, scan_marketplaces, scan_skills, MarketplaceSummary, SkillSummary};
+use crate::storage::{
+    discover_claude_dir, scan_marketplaces, scan_mcp_servers, scan_skills, MarketplaceSummary,
+    McpServerSummary, SkillSummary,
+};
 
 /// Returns the path Claude Code reads `settings.json` from. Respects the
 /// `CLAUDE_CONFIG_DIR` env var.
@@ -96,4 +99,11 @@ pub fn list_marketplaces_cmd() -> AppResult<Vec<MarketplaceSummary>> {
 #[tauri::command]
 pub fn list_skills_cmd() -> AppResult<Vec<SkillSummary>> {
     scan_skills(&discover_claude_dir())
+}
+
+/// Scans MCP server definitions from `${HOME}/.claude.json` top-level
+/// `mcpServers`, enriched with health / needs-auth cache files.
+#[tauri::command]
+pub fn list_mcp_servers_cmd() -> AppResult<Vec<McpServerSummary>> {
+    scan_mcp_servers()
 }

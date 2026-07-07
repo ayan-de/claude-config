@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Sparkles, Store, type LucideIcon } from "lucide-react";
+import { FileText, PlugZap, Sparkles, Store, type LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
@@ -11,6 +11,10 @@ import {
   MarketplaceSidebarButton,
   MarketplaceView,
 } from "@/components/Marketplace";
+import {
+  McpSidebarButton,
+  McpView,
+} from "@/components/Mcp";
 import {
   SkillsSidebarButton,
   SkillsView,
@@ -75,6 +79,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Reusable SKILL.md instructions loaded by Claude Code on demand — your own plus those bundled with installed plugins.",
     SidebarButton: SkillsSidebarButton,
     Component: SkillsView,
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    icon: PlugZap,
+    tooltip:
+      "Browse MCP servers Claude Code connects to — globally configured in ~/.claude.json.",
+    SidebarButton: McpSidebarButton,
+    Component: McpView,
   },
 ];
 

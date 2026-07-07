@@ -189,3 +189,38 @@ export interface SkillSummary {
    *  missing key defaults to true (Claude Code treats absent as enabled). */
   enabled: boolean;
 }
+
+/** Transport declared in the MCP server config. Defaults to "stdio"
+ *  when the entry has no `type` field — Claude Code's documented default. */
+export type McpTransport = "stdio" | "http" | "sse";
+
+/** Health snapshot from `~/.claude/mcp-health-cache.json`. `None` when
+ *  no record exists yet (server never checked). */
+export type McpHealth =
+  | { status: "healthy" }
+  | {
+      status: "failing";
+      last_error: string;
+      failure_count: number;
+    };
+
+/**
+ * One row in the MCP servers list. Mirrors `McpServerSummary` in
+ * `src-tauri/src/storage/mcp.rs`. Stdio fields are empty for http/sse
+ *  entries; http/sse fields are empty for stdio entries.
+ */
+export interface McpServerSummary {
+  name: string;
+  transport: McpTransport;
+  command: string | null;
+  args: string[];
+  /** Env var names → values (stdio only). */
+  env: Record<string, string>;
+  url: string | null;
+  /** HTTP header names → values (http/sse only). */
+  headers: Record<string, string>;
+  health: McpHealth | null;
+  needs_auth: boolean;
+  /** Diagnostic — the path the row was read from. */
+  source: string;
+}

@@ -70,6 +70,7 @@ pub fn run() {
             commands::system::claude_md_exists_cmd,
             commands::system::list_marketplaces_cmd,
             commands::system::list_skills_cmd,
+            commands::system::list_mcp_servers_cmd,
             commands::providers::list_providers_cmd,
             commands::providers::get_provider_cmd,
             commands::providers::add_provider_cmd,
