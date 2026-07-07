@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -29,6 +30,8 @@ interface Props {
   onExport: (includeSecrets: boolean) => void;
   onImport: () => void;
   onCheckForUpdates: () => void;
+  dangerousMode: boolean | null;
+  onToggleDangerousMode: () => void;
 }
 
 export function SettingsMenu({
@@ -41,6 +44,8 @@ export function SettingsMenu({
   onExport,
   onImport,
   onCheckForUpdates,
+  dangerousMode,
+  onToggleDangerousMode,
 }: Props) {
   return (
     <DropdownMenu>
@@ -95,6 +100,17 @@ export function SettingsMenu({
             <Upload />
             Import providers
           </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Safety</DropdownMenuLabel>
+          <DropdownMenuCheckboxItem
+            checked={dangerousMode === true}
+            onCheckedChange={() => onToggleDangerousMode()}
+            disabled={dangerousMode === null}
+          >
+            Dangerous mode (skip permissions)
+          </DropdownMenuCheckboxItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
