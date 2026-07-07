@@ -5,7 +5,7 @@
 //! manifest and extract a small summary for the UI. Per-marketplace plugin
 //! inspection and add/remove are deferred — this module is read-only for now.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -54,9 +54,16 @@ pub struct MarketplaceSummary {
     pub description: String,
     pub plugin_count: usize,
     /// Number of plugins from this marketplace that are currently enabled in
-    /// `settings.json` (`enabledPlugins`). Keys are `<plugin>@<marketplace>`;
-    /// any key whose `<marketplace>` half matches this row's name counts.
+    /// `settings.json` (`enabledPlugins`). Mirrors `installed_plugins.len()` —
+    /// kept as a separate field so the header pill doesn't recompute.
     pub installed_count: usize,
+    /// Plugin names from this marketplace that are currently enabled in
+    /// `settings.json`. Sorted alphabetically for stable rendering.
+    pub installed_plugins: Vec<String>,
+    /// Plugin names declared in the manifest that are NOT yet enabled.
+    /// Order follows the manifest (Claude Code preserves author intent —
+    /// featured/recommended plugins appear first).
+    pub available_plugins: Vec<String>,
     pub source: String,
 }
 
@@ -71,9 +78,10 @@ pub fn scan_marketplaces(claude_dir: &Path) -> AppResult<Vec<MarketplaceSummary>
         return Ok(Vec::new());
     }
 
-    // Per-marketplace installed counts come from settings.json.enabledPlugins.
-    // Missing/malformed settings is not fatal — we just report zero installed.
-    let installed_counts = read_installed_counts(claude_dir);
+    // Per-marketplace installed plugin names come from settings.json
+    // `enabledPlugins`. Missing/malformed settings is not fatal — we just
+    // report zero installed.
+    let installed_by_marketplace = read_installed_plugins_by_marketplace(claude_dir);
 
     let entries = fs::read_dir(&marketplaces_dir).map_err(|e| {
         AppError::Io(std::io::Error::new(
@@ -110,9 +118,18 @@ pub fn scan_marketplaces(claude_dir: &Path) -> AppResult<Vec<MarketplaceSummary>
             .into_owned();
 
         let manifest_path = path.join(MARKETPLACES_MANIFEST);
-        let mut summary = match fs::read_to_string(&manifest_path) {
+        let summary = match fs::read_to_string(&manifest_path) {
             Ok(raw) => match serde_json::from_str::<Manifest>(&raw) {
-                Ok(m) => summary_from_manifest(m, &dir_name, &manifest_path),
+                Ok(m) => {
+                    let (mut s, manifest_names) =
+                        summary_from_manifest(m, &dir_name, &manifest_path);
+                    let installed_set = installed_by_marketplace
+                        .get(&s.name)
+                        .cloned()
+                        .unwrap_or_default();
+                    split_installed_available(&mut s, &manifest_names, &installed_set);
+                    s
+                }
                 Err(e) => {
                     log::warn!(
                         "marketplaces: skipping {} (manifest parse error: {e})",
@@ -130,6 +147,8 @@ pub fn scan_marketplaces(claude_dir: &Path) -> AppResult<Vec<MarketplaceSummary>
                     description: "(manifest not yet available)".into(),
                     plugin_count: 0,
                     installed_count: 0,
+                    installed_plugins: Vec::new(),
+                    available_plugins: Vec::new(),
                     source: manifest_path.display().to_string(),
                 }
             }
@@ -141,12 +160,6 @@ pub fn scan_marketplaces(claude_dir: &Path) -> AppResult<Vec<MarketplaceSummary>
                 continue;
             }
         };
-        // Match by manifest `name` (which falls back to dir_name) so a row
-        // derived from a well-formed manifest still resolves to its installs.
-        summary.installed_count = installed_counts
-            .get(&summary.name)
-            .copied()
-            .unwrap_or(0);
         out.push(summary);
     }
 
@@ -155,37 +168,39 @@ pub fn scan_marketplaces(claude_dir: &Path) -> AppResult<Vec<MarketplaceSummary>
     Ok(out)
 }
 
-/// Counts `enabledPlugins` entries in `<claude_dir>/settings.json`,
-/// bucketed by the `<marketplace>` half of each `name@marketplace` key.
+/// Reads `enabledPlugins` from `<claude_dir>/settings.json` and groups
+/// installed plugin names by their `<marketplace>` half of each key.
 ///
 /// Returns an empty map on any failure (missing/malformed settings) — the
 /// caller should treat that as "we just don't know what's installed" and
-/// surface a count of zero rather than failing the whole marketplace scan.
-fn read_installed_counts(claude_dir: &Path) -> HashMap<String, usize> {
+/// surface empty lists rather than failing the whole marketplace scan.
+fn read_installed_plugins_by_marketplace(
+    claude_dir: &Path,
+) -> HashMap<String, HashSet<String>> {
     let Ok(Some(settings)) = read_settings(&claude_dir.join("settings.json")) else {
         return HashMap::new();
     };
-    let Some(entries) = settings
-        .get("enabledPlugins")
-        .and_then(Value::as_object)
-    else {
+    let Some(entries) = settings.get("enabledPlugins").and_then(Value::as_object) else {
         return HashMap::new();
     };
 
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut by_marketplace: HashMap<String, HashSet<String>> = HashMap::new();
     for (key, value) in entries {
         // Claude Code accepts both `true` and `{enabled: true}`. Treat any
         // truthy / enabled entry as installed; ignore entries without an `@`.
-        let Some(marketplace) = key.split_once('@').map(|(_, m)| m) else {
+        let Some((plugin, marketplace)) = key.split_once('@') else {
             log::warn!("enabledPlugins: skipping key without '@': {key}");
             continue;
         };
         if !is_enabled(value) {
             continue;
         }
-        *counts.entry(marketplace.to_string()).or_insert(0) += 1;
+        by_marketplace
+            .entry(marketplace.to_string())
+            .or_default()
+            .insert(plugin.to_string());
     }
-    counts
+    by_marketplace
 }
 
 fn is_enabled(value: &Value) -> bool {
@@ -199,12 +214,17 @@ fn is_enabled(value: &Value) -> bool {
     }
 }
 
+/// Build a `MarketplaceSummary` from a parsed manifest and return the
+/// manifest's plugin name list (in author-declared order). The plugin list
+/// is needed later to split installed vs available; returning it together
+/// avoids re-parsing the manifest.
 fn summary_from_manifest(
     m: Manifest,
     dir_name: &str,
     manifest_path: &Path,
-) -> MarketplaceSummary {
-    MarketplaceSummary {
+) -> (MarketplaceSummary, Vec<String>) {
+    let plugin_names = extract_plugin_names(&m.plugins);
+    let summary = MarketplaceSummary {
         // Manifest name wins, but fall back to the dir so a malformed /
         // older manifest still shows up.
         name: if m.name.is_empty() {
@@ -214,10 +234,64 @@ fn summary_from_manifest(
         },
         owner: m.owner.map(|o| o.name).unwrap_or_default(),
         description: m.metadata.map(|md| md.description).unwrap_or_default(),
-        plugin_count: m.plugins.len(),
+        plugin_count: plugin_names.len(),
         installed_count: 0,
+        installed_plugins: Vec::new(),
+        available_plugins: Vec::new(),
         source: manifest_path.display().to_string(),
-    }
+    };
+    (summary, plugin_names)
+}
+
+/// Pull the `name` field from each plugin object in manifest order.
+/// Skips entries without a non-empty `name` — they're malformed and
+/// can't be cross-referenced to settings.json anyway.
+fn extract_plugin_names(plugins: &[serde_json::Value]) -> Vec<String> {
+    plugins
+        .iter()
+        .filter_map(|p| {
+            p.get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// Populate `installed_plugins`, `available_plugins`, and `installed_count`
+/// against the manifest's plugin list.
+///
+/// Order semantics:
+/// - `installed_plugins`: alphabetical (stable rendering across refreshes).
+/// - `available_plugins`: manifest order (preserves featured/recommended
+///   placement that the marketplace author chose).
+///
+/// Installed names that don't appear in the manifest (e.g. from a removed
+/// marketplace or a typo) are NOT shown here — settings.json remains the
+/// authoritative record; this view only surfaces what the marketplace
+/// declares.
+fn split_installed_available(
+    summary: &mut MarketplaceSummary,
+    manifest_plugin_names: &[String],
+    installed_set: &HashSet<String>,
+) {
+    let mut installed_sorted: Vec<String> = manifest_plugin_names
+        .iter()
+        .filter(|n| installed_set.contains(*n))
+        .cloned()
+        .collect();
+    installed_sorted.sort();
+
+    let available_plugins: Vec<String> = manifest_plugin_names
+        .iter()
+        .filter(|n| !installed_set.contains(*n))
+        .cloned()
+        .collect();
+
+    summary.installed_count = installed_sorted.len();
+    summary.installed_plugins = installed_sorted;
+    summary.available_plugins = available_plugins;
 }
 
 #[cfg(test)]
@@ -272,9 +346,12 @@ mod tests {
         assert_eq!(out[0].description, "Cool plugins");
         assert_eq!(out[0].plugin_count, 3);
         assert_eq!(out[0].installed_count, 0);
+        assert!(out[0].installed_plugins.is_empty());
+        assert_eq!(out[0].available_plugins, vec!["a", "b", "c"]);
         assert_eq!(out[1].name, "b-market");
         assert_eq!(out[1].plugin_count, 1);
         assert_eq!(out[1].installed_count, 0);
+        assert_eq!(out[1].available_plugins, vec!["x"]);
     }
 
     #[test]
@@ -321,6 +398,103 @@ mod tests {
     }
 
     #[test]
+    fn installed_plugins_are_sorted_alphabetically() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "plugins/marketplaces/awesome/.claude-plugin/marketplace.json",
+            r#"{
+                "name": "awesome",
+                "plugins": [
+                    {"name": "zebra"}, {"name": "alpha"}, {"name": "mango"}
+                ]
+            }"#,
+        );
+        write(
+            tmp.path(),
+            "settings.json",
+            r#"{
+                "enabledPlugins": {
+                    "mango@awesome": true,
+                    "zebra@awesome": true,
+                    "alpha@awesome": true
+                }
+            }"#,
+        );
+        let out = scan_marketplaces(tmp.path()).unwrap();
+        assert_eq!(out[0].installed_plugins, vec!["alpha", "mango", "zebra"]);
+        // Available preserves manifest order.
+        assert_eq!(out[0].available_plugins, Vec::<String>::new());
+    }
+
+    #[test]
+    fn available_plugins_preserve_manifest_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "plugins/marketplaces/awesome/.claude-plugin/marketplace.json",
+            r#"{
+                "name": "awesome",
+                "plugins": [
+                    {"name": "featured"},
+                    {"name": "middle"},
+                    {"name": "another"},
+                    {"name": "first"}
+                ]
+            }"#,
+        );
+        write(
+            tmp.path(),
+            "settings.json",
+            r#"{
+                "enabledPlugins": {
+                    "featured@awesome": true
+                }
+            }"#,
+        );
+        let out = scan_marketplaces(tmp.path()).unwrap();
+        assert_eq!(out[0].installed_plugins, vec!["featured"]);
+        // Manifest order preserved (not alphabetical).
+        assert_eq!(
+            out[0].available_plugins,
+            vec!["middle", "another", "first"]
+        );
+    }
+
+    #[test]
+    fn installed_names_not_in_manifest_are_ignored_in_summary() {
+        // enabledPlugins may reference plugins no longer in the manifest
+        // (marketplace removed, renamed, or stale entry). Those shouldn't
+        // appear under the marketplace row — settings.json is the source
+        // of truth and still authoritatively enables them.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "plugins/marketplaces/awesome/.claude-plugin/marketplace.json",
+            r#"{
+                "name": "awesome",
+                "plugins": [{"name": "a"}]
+            }"#,
+        );
+        write(
+            tmp.path(),
+            "settings.json",
+            r#"{
+                "enabledPlugins": {
+                    "a@awesome": true,
+                    "ghost@awesome": true,
+                    "phantom@other": true
+                }
+            }"#,
+        );
+        let out = scan_marketplaces(tmp.path()).unwrap();
+        // Only `a` shows up; ghost is silently dropped from this row.
+        assert_eq!(out[0].installed_plugins, vec!["a"]);
+        assert_eq!(out[0].installed_count, 1);
+        assert_eq!(out[0].available_plugins, Vec::<String>::new());
+    }
+
+    #[test]
     fn missing_settings_means_zero_installed_not_error() {
         let tmp = tempfile::tempdir().unwrap();
         write(
@@ -332,6 +506,8 @@ mod tests {
         let out = scan_marketplaces(tmp.path()).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].installed_count, 0);
+        assert!(out[0].installed_plugins.is_empty());
+        assert_eq!(out[0].available_plugins, vec!["a"]);
     }
 
     #[test]
@@ -365,6 +541,8 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "empty");
         assert!(out[0].description.contains("not yet available"));
+        assert!(out[0].installed_plugins.is_empty());
+        assert!(out[0].available_plugins.is_empty());
     }
 
     #[test]

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   Package,
   Plus,
@@ -129,6 +131,10 @@ function MarketplaceList({
   marketplaces: import("@/lib/types").MarketplaceSummary[] | null;
   initialLoad: boolean;
 }) {
+  // Track which marketplace rows are expanded. Independent per row — Claude
+  // Code's own UI does the same (each row toggles on its own).
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
   if (initialLoad) {
     return (
       <div className="flex items-center justify-center gap-2 rounded-xl border bg-card/45 p-8 text-xs text-muted-foreground">
@@ -153,48 +159,151 @@ function MarketplaceList({
     );
   }
 
+  const toggle = (name: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="flex flex-col divide-y divide-border/40 overflow-hidden rounded-xl border bg-card/45">
-      {rows.map((m) => (
-        <div key={m.name} className="flex flex-col gap-1 p-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="flex items-baseline gap-2 truncate">
-              <h3 className="truncate text-sm font-semibold">{m.name}</h3>
-              {m.owner && (
-                <span className="truncate text-[10px] text-muted-foreground">
-                  by {m.owner}
-                </span>
-              )}
-            </div>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                m.installed_count > 0
-                  ? "bg-primary/10 text-primary"
-                  : "bg-muted/60 text-muted-foreground",
-              )}
-              title={`${m.installed_count} of ${m.plugin_count} plugin${m.plugin_count === 1 ? "" : "s"} installed`}
+      {rows.map((m) => {
+        const isOpen = expanded.has(m.name);
+        return (
+          <div key={m.name} className="flex flex-col">
+            <button
+              type="button"
+              onClick={() => toggle(m.name)}
+              aria-expanded={isOpen}
+              aria-controls={`marketplace-panel-${m.name}`}
+              className="group flex w-full flex-col gap-1 p-4 text-left cursor-pointer hover:bg-card/60 transition-colors"
             >
-              {m.installed_count} / {m.plugin_count} installed
-            </span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 truncate">
+                  {isOpen ? (
+                    <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <h3 className="truncate text-sm font-semibold">{m.name}</h3>
+                  {m.owner && (
+                    <span className="truncate text-[10px] text-muted-foreground">
+                      by {m.owner}
+                    </span>
+                  )}
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                    m.installed_count > 0
+                      ? "bg-primary/10 text-primary"
+                      : "bg-muted/60 text-muted-foreground",
+                  )}
+                  title={`${m.installed_count} of ${m.plugin_count} plugin${m.plugin_count === 1 ? "" : "s"} installed`}
+                >
+                  {m.installed_count} / {m.plugin_count} installed
+                </span>
+              </div>
+              {m.description ? (
+                <p className="text-xs text-muted-foreground/90 line-clamp-3">
+                  {m.description}
+                </p>
+              ) : (
+                <p className="text-[11px] italic text-muted-foreground/60">
+                  No description provided.
+                </p>
+              )}
+              <p
+                className="truncate font-mono text-[10px] text-muted-foreground/50"
+                title={m.source}
+              >
+                {m.source}
+              </p>
+            </button>
+
+            {isOpen && (
+              <div
+                id={`marketplace-panel-${m.name}`}
+                className="border-t border-border/40 bg-background/30 px-4 py-3 space-y-3"
+              >
+                <PluginSection
+                  label="Installed"
+                  count={m.installed_plugins.length}
+                  names={m.installed_plugins}
+                  emptyHint="No plugins from this marketplace are installed."
+                />
+                <PluginSection
+                  label="Available"
+                  count={m.available_plugins.length}
+                  names={m.available_plugins}
+                  emptyHint="No additional plugins available to install."
+                />
+              </div>
+            )}
           </div>
-          {m.description ? (
-            <p className="text-xs text-muted-foreground/90 line-clamp-3">
-              {m.description}
-            </p>
-          ) : (
-            <p className="text-[11px] italic text-muted-foreground/60">
-              No description provided.
-            </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Cap available list rendering to keep expanded panels manageable —
+ *  marketplace manifests can list hundreds of plugins. Showing first 20
+ *  + "+N more" is enough to scan; the user can /plugin search to find
+ *  anything else when install is wired up. */
+const AVAILABLE_PREVIEW_LIMIT = 20;
+
+function PluginSection({
+  label,
+  count,
+  names,
+  emptyHint,
+}: {
+  label: string;
+  count: number;
+  names: string[];
+  emptyHint: string;
+}) {
+  const visible = names.slice(0, AVAILABLE_PREVIEW_LIMIT);
+  const overflow = names.length - visible.length;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </h4>
+        <span className="text-[10px] tabular-nums text-muted-foreground/60">
+          ({count})
+        </span>
+      </div>
+      {names.length === 0 ? (
+        <p className="text-[11px] italic text-muted-foreground/60">
+          {emptyHint}
+        </p>
+      ) : (
+        <ul className="space-y-0.5 pl-2">
+          {visible.map((n) => (
+            <li
+              key={n}
+              className="truncate font-mono text-[11px] text-foreground/80"
+              title={n}
+            >
+              {n}
+            </li>
+          ))}
+          {overflow > 0 && (
+            <li className="text-[11px] italic text-muted-foreground/60">
+              +{overflow} more
+            </li>
           )}
-          <p
-            className="truncate font-mono text-[10px] text-muted-foreground/50"
-            title={m.source}
-          >
-            {m.source}
-          </p>
-        </div>
-      ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -145,8 +145,13 @@ export interface MarketplaceSummary {
   /** Number of `plugins[]` entries in the manifest. */
   plugin_count: number;
   /** Number of plugins from this marketplace currently enabled in
-   *  `settings.json` (`enabledPlugins`). 0 when settings is missing/malformed. */
+   *  `settings.json` (`enabledPlugins`). Mirrors `installed_plugins.length`. */
   installed_count: number;
+  /** Names of installed plugins from this marketplace. Alphabetical.
+   *  Empty when settings.json is missing/malformed. */
+  installed_plugins: string[];
+  /** Names of manifest plugins not yet installed. Manifest order preserved. */
+  available_plugins: string[];
   /** Diagnostic — path of the manifest file we read this row from. */
   source: string;
 }
