@@ -79,6 +79,10 @@ export const previewProviderEnv = (id: string) =>
   call<Record<string, unknown>>("preview_provider_env_cmd", { id });
 export const getSettingsEnvKeys = () =>
   call<string[]>("get_settings_env_keys_cmd");
+export const getDangerousMode = () =>
+  call<boolean>("get_dangerous_mode_cmd");
+export const setDangerousMode = (enabled: boolean) =>
+  call<void>("set_dangerous_mode_cmd", { enabled });
 
 // ---------- subscription ----------
 
