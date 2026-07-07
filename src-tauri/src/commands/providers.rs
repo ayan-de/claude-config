@@ -122,6 +122,30 @@ pub fn delete_provider_cmd(
     if let Err(e) = state.keyring.delete_token(&id) {
         log::warn!("keyring delete for {id} failed: {e}");
     }
+    // Clean up any tracker config + tracker keyring entries. Best-effort
+    // — a stale row doesn't break anything, but we shouldn't leave it
+    // around to confuse the user if they re-create the provider.
+    let trackers_path = state.trackers_path();
+    if let Ok(mut tfile) = crate::storage::load_trackers_file(&trackers_path) {
+        if let Some(cfg) = tfile.trackers.remove(&id) {
+            if let Ok(source) = cfg.source_id() {
+                if let Some(src) = crate::tracker::SourceRegistry::new().get(source) {
+                    let secret_keys: Vec<&str> = src
+                        .fields()
+                        .iter()
+                        .filter(|f| f.secret)
+                        .map(|f| f.key)
+                        .collect();
+                    if let Err(e) = state.keyring.delete_tracker_secrets(&id, &secret_keys) {
+                        log::warn!("tracker keyring cleanup for {id} failed: {e}");
+                    }
+                }
+            }
+            if let Err(e) = crate::storage::save_trackers_file(&trackers_path, &tfile) {
+                log::warn!("tracker file cleanup for {id} failed: {e}");
+            }
+        }
+    }
     Ok(())
 }
 
