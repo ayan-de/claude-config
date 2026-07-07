@@ -7,6 +7,7 @@ import type {
   MarketplaceSummary,
   Provider,
   ProviderInput,
+  SkillSummary,
 } from "./types";
 
 interface RawError {
@@ -52,6 +53,14 @@ export const claudeMdExists = () => call<boolean>("claude_md_exists_cmd");
  */
 export const listMarketplaces = () =>
   call<MarketplaceSummary[]>("list_marketplaces_cmd");
+
+/**
+ * Lists user-authored skills (the SKILL.md files under the user's
+ * claude config dir's skills/ tree) plus skills bundled with installed
+ * plugins. Mirrors `scan_skills` in `src-tauri/src/storage/skills.rs`.
+ * Returns an empty array when no skills are installed yet.
+ */
+export const listSkills = () => call<SkillSummary[]>("list_skills_cmd");
 
 // ---------- providers ----------
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Store, type LucideIcon } from "lucide-react";
+import { FileText, Sparkles, Store, type LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
@@ -11,6 +11,10 @@ import {
   MarketplaceSidebarButton,
   MarketplaceView,
 } from "@/components/Marketplace";
+import {
+  SkillsSidebarButton,
+  SkillsView,
+} from "@/components/Skills";
 
 export interface GlobalTabProps {
   /** Called when the tab wants to close itself (e.g. Cancel / back button). */
@@ -62,6 +66,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Browse registries of plugins, skills, and commands contributed for Claude Code.",
     SidebarButton: MarketplaceSidebarButton,
     Component: MarketplaceView,
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: Sparkles,
+    tooltip:
+      "Reusable SKILL.md instructions loaded by Claude Code on demand — your own plus those bundled with installed plugins.",
+    SidebarButton: SkillsSidebarButton,
+    Component: SkillsView,
   },
 ];
 

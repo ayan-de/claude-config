@@ -155,3 +155,37 @@ export interface MarketplaceSummary {
   /** Diagnostic — path of the manifest file we read this row from. */
   source: string;
 }
+
+/**
+ * Where a skill came from. Mirrors `SkillSource` in
+ * `src-tauri/src/storage/skills.rs`. Use the `kind` discriminator to
+ * narrow — `plugin` entries carry plugin/marketplace/version for grouping.
+ */
+export type SkillSource =
+  | { kind: "user" }
+  | {
+      kind: "plugin";
+      plugin: string;
+      marketplace: string;
+      version: string;
+    };
+
+/**
+ * One row in the Skills list. Mirrors `SkillSummary` in
+ * `src-tauri/src/storage/skills.rs`.
+ */
+export interface SkillSummary {
+  /** Folder name (e.g. "graphify"). For plugin skills, the last path
+   *  segment of the skill dir inside the plugin. */
+  name: string;
+  /** First-line description from SKILL.md frontmatter; empty when absent. */
+  description: string;
+  source: SkillSource;
+  /** Absolute path to the SKILL.md file. Drives tooltips and any future
+   *  "reveal in file manager" action. */
+  path: string;
+  /** Always true for user skills. For plugin skills, mirrors
+   *  `enabledPlugins["<plugin>@<marketplace>"]` in settings.json —
+   *  missing key defaults to true (Claude Code treats absent as enabled). */
+  enabled: boolean;
+}

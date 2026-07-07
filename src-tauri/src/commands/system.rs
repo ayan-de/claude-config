@@ -7,7 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
-use crate::storage::{discover_claude_dir, scan_marketplaces, MarketplaceSummary};
+use crate::storage::{discover_claude_dir, scan_marketplaces, scan_skills, MarketplaceSummary, SkillSummary};
 
 /// Returns the path Claude Code reads `settings.json` from. Respects the
 /// `CLAUDE_CONFIG_DIR` env var.
@@ -88,4 +88,12 @@ pub fn claude_md_exists_cmd() -> bool {
 #[tauri::command]
 pub fn list_marketplaces_cmd() -> AppResult<Vec<MarketplaceSummary>> {
     scan_marketplaces(&discover_claude_dir())
+}
+
+/// Scans both user-authored skills (`<claude_dir>/skills/**/SKILL.md`) and
+/// skills bundled with installed plugins (resolved via
+/// `<claude_dir>/plugins/installed_plugins.json`). Honors `CLAUDE_CONFIG_DIR`.
+#[tauri::command]
+pub fn list_skills_cmd() -> AppResult<Vec<SkillSummary>> {
+    scan_skills(&discover_claude_dir())
 }
