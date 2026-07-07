@@ -2,6 +2,7 @@
 
 import { isWebEnv } from "@/lib/utils-app";
 import { useProvidersApp } from "@/hooks/useProvidersApp";
+import { useDangerousMode } from "@/hooks/useDangerousMode";
 import { useGlobalPanel } from "@/hooks/useGlobalPanel";
 import { useUpdater } from "@/hooks/useUpdater";
 
@@ -9,6 +10,7 @@ import { SettingsMenu } from "@/components/SettingsMenu";
 import { Sidebar } from "@/components/Sidebar";
 import { Main } from "@/components/Main";
 import { TitleBar } from "@/components/TitleBar";
+import { DangerousModeConfirm } from "@/components/DangerousModeConfirm";
 
 import { GLOBAL_TABS } from "@/data/globalTabs";
 
@@ -16,6 +18,7 @@ export default function Page() {
   const providers = useProvidersApp();
   const panel = useGlobalPanel();
   const updater = useUpdater();
+  const dangerous = useDangerousMode();
 
   if (!providers.mounted) {
     return (
@@ -90,6 +93,8 @@ export default function Page() {
               onExport={providers.handleExport}
               onImport={providers.handleImport}
               onCheckForUpdates={updater.checkNow}
+              dangerousMode={dangerous.enabled}
+              onToggleDangerousMode={dangerous.toggle}
             />
           </div>
         }
@@ -144,6 +149,11 @@ export default function Page() {
           onDeleteProvider={providers.handleDeleteConfirm}
         />
       </div>
+      <DangerousModeConfirm
+        open={dangerous.confirmOpen}
+        onConfirm={dangerous.confirm}
+        onCancel={dangerous.dismissConfirm}
+      />
     </div>
   );
 }
