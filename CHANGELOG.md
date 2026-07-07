@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-07-07
+
+### Added
+- **Dangerous-mode toggle** — Settings → Safety group exposes a global switch that flips `permissions.defaultMode` in `~/.claude/settings.json` between `"bypassPermissions"` and absent, equivalent to passing `--dangerously-skip-permissions` to every Claude Code invocation
+  - One-shot confirm dialog gates the first ON, with a carve-out note (`rm -rf /` and `rm -rf ~` still prompt as circuit breakers)
+  - First-time acknowledgement is persisted in `localStorage` so subsequent toggles skip the dialog
+  - Backend writes reuse `settings::write_settings_atomic` — same sidecar lock and timestamped backup as `load_provider_cmd`, no race between the two writers
+  - Unrelated top-level keys in `settings.json` (`env`, `hooks`, `enabledPlugins`, custom keys) are preserved verbatim
+- New backend module `src-tauri/src/storage/permissions.rs` with 10 unit tests (7 pure, 3 integration)
+- New Tauri commands `get_dangerous_mode_cmd` and `set_dangerous_mode_cmd`
+- `useDangerousMode` hook — manages load + optimistic toggle + rollback on write failure
+- `DangerousModeConfirm` dialog component
+- `Switch` UI primitive wrapping `@base-ui/react/switch`
+
+### Fixed
+- Hydration error: `DialogDescription` (renders `<p>` by default) contained nested `<p>` tags; switched to `render={<div />}` to keep the ARIA wiring while making the markup valid
+
 ## [0.5.0] - 2026-07-06
 
 ### Added
