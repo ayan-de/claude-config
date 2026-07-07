@@ -167,10 +167,15 @@ function MarketplaceList({
               )}
             </div>
             <span
-              className="shrink-0 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-              title={`${m.plugin_count} plugin${m.plugin_count === 1 ? "" : "s"}`}
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                m.installed_count > 0
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted/60 text-muted-foreground",
+              )}
+              title={`${m.installed_count} of ${m.plugin_count} plugin${m.plugin_count === 1 ? "" : "s"} installed`}
             >
-              {m.plugin_count} plugin{m.plugin_count === 1 ? "" : "s"}
+              {m.installed_count} / {m.plugin_count} installed
             </span>
           </div>
           {m.description ? (
