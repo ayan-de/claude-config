@@ -46,11 +46,12 @@ SettingsMenu (new "Safety" group, one Switch)
               └─ api.setDangerousMode(enabled)          [src/lib/api.ts]
                    └─ invoke("set_dangerous_mode_cmd")
                         └─ commands::settings::set_dangerous_mode_cmd
-                             └─ storage::permissions::set(enabled)
-                                  └─ settings::with_settings_lock(...)
-                                       └─ atomic read-modify-write of
-                                          ~/.claude/settings.json, touching
-                                          only the `permissions` key
+                             └─ storage::permissions::set(path, backups_dir, enabled)
+                                  └─ settings::read_settings → mutate value →
+                                     settings::write_settings_atomic
+                                       └─ existing locked + backed-up atomic write
+                                          of ~/.claude/settings.json, touching only
+                                          the `permissions` key
 
 On startup:
   useDangerousMode calls api.getDangerousMode()
@@ -61,26 +62,35 @@ On startup:
 
 Three principles preserved:
 
-1. **Same lock for every settings.json write.** `load_provider_cmd` and
-   `set_dangerous_mode_cmd` both call `with_settings_lock`. No race where a
-   provider load silently clobbers a dangerous-mode toggle (or vice versa).
+1. **Same atomic-write path as `load_provider`.** `load_provider_cmd` and
+   `set_dangerous_mode_cmd` both end in `settings::write_settings_atomic`,
+   which holds the same sidecar lock and creates a timestamped backup.
+   No race where a provider load silently clobbers a dangerous-mode toggle
+   (or vice versa); no inconsistent backup policy between the two writes.
 2. **Pure logic stays pure.** "Given enabled=true, what's the resulting
    `permissions` block?" is a one-liner tested in isolation. I/O is a thin
-   wrapper around the existing lock helper.
+   wrapper around the existing `read_settings` / `write_settings_atomic` pair.
 3. **Same merge semantics as env.** `permissions` is unknown to `merge.rs`,
    so `load_provider` doesn't touch it — confirmed by re-reading
-   `merge.rs::merge_env` which preserves unknown keys verbatim.
+   `merge.rs::merge_env` which preserves unknown top-level keys verbatim
+   (it only iterates over `existing.env` and `provider_env`).
 
 ## Components
 
-Six files touched.
+Nine files touched.
 
 ### Rust backend
 
 **`src-tauri/src/storage/permissions.rs`** (new, ~60 lines)
 
 ```rust
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::models::{AppError, AppResult};
+use crate::storage::settings;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Permissions {
@@ -100,7 +110,7 @@ pub fn block_for(enabled: bool) -> Permissions {
 /// Read current state. Returns false if settings.json is missing, malformed,
 /// has no `permissions` block, or `defaultMode` is anything other than
 /// "bypassPermissions". The conservative default.
-pub fn read(settings: &serde_json::Value) -> bool {
+pub fn read(settings: &Value) -> bool {
     settings
         .get("permissions")
         .and_then(|p| p.get("defaultMode"))
@@ -108,14 +118,17 @@ pub fn read(settings: &serde_json::Value) -> bool {
         == Some("bypassPermissions")
 }
 
-/// Locked atomic write. Reuses `settings::with_settings_lock`.
-pub fn set(app_state: &AppState, enabled: bool) -> Result<(), AppError> {
-    let target = serde_json::to_value(block_for(enabled))
+/// Locked + backed-up atomic write. Reuses `settings::write_settings_atomic`
+/// so the same lock + backup semantics as `load_provider` apply.
+pub fn set(path: &Path, backups_dir: &Path, enabled: bool) -> AppResult<()> {
+    let mut value = match settings::read_settings(path)? {
+        Some(v) => v,
+        None => Value::Object(Default::default()),
+    };
+    value["permissions"] = serde_json::to_value(block_for(enabled))
         .map_err(|e| AppError::Internal(format!("serialize permissions: {e}")))?;
-    settings::with_settings_lock(&settings_path(app_state), |settings| {
-        settings["permissions"] = target;
-        Ok(())
-    })
+    settings::write_settings_atomic(path, &value, backups_dir)?;
+    Ok(())
 }
 ```
 
@@ -124,7 +137,6 @@ pub fn set(app_state: &AppState, enabled: bool) -> Result<(), AppError> {
 ```rust
 #[tauri::command]
 pub fn get_dangerous_mode_cmd(app: tauri::AppHandle) -> AppResult<bool> {
-    let app_state = app.state::<AppState>();
     let path = settings::settings_path();
     match settings::read_settings(&path)? {
         None => Ok(false),
@@ -135,7 +147,9 @@ pub fn get_dangerous_mode_cmd(app: tauri::AppHandle) -> AppResult<bool> {
 #[tauri::command]
 pub fn set_dangerous_mode_cmd(app: tauri::AppHandle, enabled: bool) -> AppResult<()> {
     let app_state = app.state::<AppState>();
-    permissions::set(&app_state, enabled)
+    let path = settings::settings_path();
+    let backups = app_state.backups_dir();
+    permissions::set(&path, &backups, enabled)
 }
 ```
 
@@ -188,6 +202,14 @@ export const setDangerousMode = (enabled: boolean) =>
 - `localStorage["claude-config.dangerous-mode-ack"] = "1"` set on confirm;
   absence of this key triggers the dialog on next ON click
 
+**`src/app/page.tsx`** (existing, +4 lines)
+
+- Instantiate `useDangerousMode()` next to the existing `useUpdater()` /
+  `useProvidersApp()` calls
+- Pass `dangerousMode={dangerous.enabled}` and `onToggleDangerousMode={dangerous.toggle}`
+  to `<SettingsMenu />`
+- Render `<DangerousModeConfirm />` when `dangerous.confirmOpen` is true
+
 ## Data flow
 
 ### 1. App start — read current state
@@ -219,11 +241,10 @@ click → props.onToggleDangerousMode()
       2. api.setDangerousMode(true)
               → invoke("set_dangerous_mode_cmd", { enabled: true })
                   → commands::settings::set_dangerous_mode_cmd
-                      → permissions::set(&app_state, true)
-                          settings::with_settings_lock(&path, |settings| {
-                              settings["permissions"] = block_for(true);
-                              Ok(())
-                          })
+                      → permissions::set(&path, &backups, true)
+                          let mut value = settings::read_settings(&path)?;  // existing
+                          value["permissions"] = block_for(true);
+                          settings::write_settings_atomic(&path, &value, &backups)?;  // existing
       3. setState({ enabled: true })
       4. localStorage["claude-config.dangerous-mode-ack"] = "1"
 ```
@@ -236,6 +257,9 @@ click → props.onToggleDangerousMode()
   "permissions": { "defaultMode": "bypassPermissions" }
 }
 ```
+
+A timestamped backup at `<app-data>/backups/settings-<unix-ms>.json` is
+created before the write — same as every `load_provider_cmd` write.
 
 ### 3. User clicks toggle (ON → OFF)
 
@@ -255,18 +279,19 @@ reasons:
 
 ### Write atomicity
 
-`settings::with_settings_lock` does:
+`settings::write_settings_atomic` does:
 
-1. `lock_exclusive` on the settings file
-2. Read current `Value`
-3. Run the closure
-4. Write atomically (tempfile + fsync + rename)
+1. Acquire `lock_exclusive` on `<settings.json>.lock` (sidecar)
+2. Back up current contents to `<backups_dir>/settings-<unix-ms>.json`
+3. Serialize to `NamedTempFile` in the same directory
+4. fsync the temp file
+5. Atomic rename into place
+6. Release lock
 
-The closure does exactly: `settings["permissions"] = serde_json::to_value(block_for(enabled))?`.
-One line of mutation. Backed up like every other write.
-
-If the user toggles ON while `load_provider_cmd` is mid-flight, the OS
-lock serializes them — whichever wins, the loser sees the updated file.
+`permissions::set` is a thin wrapper that does the read, mutates one key,
+and calls this. If the user toggles ON while `load_provider_cmd` is
+mid-flight, the sidecar lock serializes them — whichever wins, the loser
+sees the updated file on its next read.
 
 ## Error handling
 
@@ -282,10 +307,10 @@ lock serializes them — whichever wins, the loser sees the updated file.
 
 - **No retry on write failure.** Atomic write either succeeds or returns a
   real I/O error; retrying a malformed-state write makes things worse.
-- **No backup before this write.** `load_provider_cmd` already backs up
-  before every env write. Dangerous-mode writes are smaller (one key) and
-  far more frequent (user might toggle daily). Backup cost > benefit. See
-  `ponytail:` markers.
+- **No backup policy divergence.** We use the existing
+  `write_settings_atomic`, which always backs up — matching `load_provider`.
+  Users toggling daily will accumulate backups; that's acceptable, and the
+  existing cleanup story (out of scope here) applies.
 
 ## Testing
 
@@ -347,26 +372,55 @@ fn roundtrip_on_then_off_keeps_empty_object() {
 ### Integration test for the locked write
 
 ```rust
+fn fresh_dir(name: &str) -> PathBuf {
+    let d = tempfile::tempdir().unwrap().keep().join(name);
+    fs::create_dir_all(&d).unwrap();
+    d
+}
+
 #[test]
 fn set_writes_and_round_trips() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("settings.json");
-    std::fs::write(&path, "{}").unwrap();
-    let app_state = make_test_state_with_path(path.clone());
+    let dir = fresh_dir("claude");
+    let path = dir.join("settings.json");
+    let backups = fresh_dir("backups");
+    fs::write(&path, "{}").unwrap();
 
-    set(&app_state, true).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
+    set(&path, &backups, true).unwrap();
+    let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("\"defaultMode\":\"bypassPermissions\""));
 
-    set(&app_state, false).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
+    set(&path, &backups, false).unwrap();
+    let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("\"permissions\":{}"));
+}
+
+#[test]
+fn set_preserves_unrelated_keys() {
+    let dir = fresh_dir("claude");
+    let path = dir.join("settings.json");
+    let backups = fresh_dir("backups");
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({
+            "env": { "ANTHROPIC_BASE_URL": "https://x" },
+            "hooks": { "Stop": [] },
+            "extraKnownMarketplaces": { "foo": 1 }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    set(&path, &backups, true).unwrap();
+    let after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["env"]["ANTHROPIC_BASE_URL"], "https://x");
+    assert_eq!(after["hooks"]["Stop"], json!([]));
+    assert_eq!(after["extraKnownMarketplaces"]["foo"], 1);
+    assert_eq!(after["permissions"]["defaultMode"], "bypassPermissions");
 }
 ```
 
-`make_test_state_with_path` constructs an `AppState` with a custom
-`app_data_dir` and a `KeyringStore` that's never called. If a similar
-helper doesn't already exist in the test scaffolding, we add it once.
+`fresh_dir` mirrors the helper already used in `settings.rs` tests.
 
 ### What we explicitly do not test
 
@@ -393,10 +447,9 @@ Plus a manual `pnpm tauri dev` smoke:
 
 ## Deferred — `ponytail:` markers
 
-These three are deliberate shortcuts the implementation will leave behind:
+These two are deliberate shortcuts the implementation will leave behind:
 
 - `// ponytail: defer managed-settings detection — separate audit` (warning UI when `disableBypassPermissionsMode: "disable"` is set by org policy)
-- `// ponytail: defer per-write backup — toggle fires too often to justify backup cost; add `permissions::set_with_backup` if anyone asks`
 - `// ponytail: defer root/sudo detection — Claude Code refuses the flag itself with a better error message`
 
 ## Out of scope
@@ -406,5 +459,5 @@ These three are deliberate shortcuts the implementation will leave behind:
 - Shell alias / wrapper script installation (docs favor settings.json; alias
   is unreliable for Tauri subprocesses)
 - Managed-settings detection (separate audit)
-- Backup-before-write (deferred)
 - Root/sudo detection (Claude Code handles)
+- Backup cleanup policy (existing story applies; not modified)
