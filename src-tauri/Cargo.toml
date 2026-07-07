@@ -33,6 +33,11 @@ fs2 = "0.4"
 dirs = "6"
 url = "2"
 
+# HTTP client for the Tracker module. Blocking client is used from sync
+# Tauri commands — each command runs in its own thread on Tauri's thread
+# pool, so blocking I/O is fine and avoids mixing two runtimes.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 
