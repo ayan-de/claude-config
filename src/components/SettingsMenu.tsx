@@ -67,7 +67,7 @@ export function SettingsMenu({
           />
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
+      <DropdownMenuContent align="end" className="min-w-70">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Locations</DropdownMenuLabel>
           <DropdownMenuItem onClick={onRevealClaudeDir}>
@@ -111,7 +111,7 @@ export function SettingsMenu({
             }}
             disabled={dangerousMode === null}
           >
-            <span className="flex-1">Dangerous mode (skip permissions)</span>
+            <span className="flex-1">Dangerous mode</span>
             <Switch
               checked={dangerousMode === true}
               onCheckedChange={() => onToggleDangerousMode()}

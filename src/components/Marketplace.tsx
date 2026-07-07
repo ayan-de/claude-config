@@ -6,8 +6,8 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  Package,
   Plus,
+  RefreshCw,
   Store,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -72,6 +72,9 @@ export function MarketplaceView({ onClose }: GlobalTabProps) {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            <ArrowLeft className="size-3.5" />
+          </Button>
           <Store className="size-4 text-primary" />
           <div>
             <h2 className="text-sm font-semibold leading-none">
@@ -93,7 +96,7 @@ export function MarketplaceView({ onClose }: GlobalTabProps) {
             {loading ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Package className="size-3.5" />
+              <RefreshCw className="size-3.5" />
             )}
             Refresh
           </Button>
@@ -104,10 +107,6 @@ export function MarketplaceView({ onClose }: GlobalTabProps) {
           >
             <Plus className="size-3.5" />
             Add Marketplace
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            <ArrowLeft className="size-3.5" />
-            Back
           </Button>
         </div>
       </div>
