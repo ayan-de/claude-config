@@ -80,6 +80,8 @@ pub fn run() {
             commands::settings::save_current_as_provider_cmd,
             commands::settings::preview_provider_env_cmd,
             commands::settings::get_settings_env_keys_cmd,
+            commands::settings::get_dangerous_mode_cmd,
+            commands::settings::set_dangerous_mode_cmd,
             commands::subscription::import_current_subscription_cmd,
             commands::transfer::export_providers_cmd,
             commands::transfer::import_providers_cmd,

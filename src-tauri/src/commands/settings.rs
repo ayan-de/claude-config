@@ -12,6 +12,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use serde_json::{Map, Value};
+use tauri::Manager;
 use uuid::Uuid;
 
 use crate::merge::{derive_provider_name, merge_env, provider_env_block};
@@ -23,6 +24,7 @@ use crate::storage::{
     load_providers_file, read_credentials_oauth, read_settings, save_providers_file,
     settings_path, write_credentials_oauth, write_settings_atomic,
 };
+use crate::storage::permissions;
 
 #[tauri::command]
 pub fn get_active_provider_cmd(
@@ -256,6 +258,26 @@ pub fn get_settings_env_keys_cmd() -> AppResult<Vec<String>> {
         return Ok(Vec::new());
     };
     Ok(env_obj.keys().cloned().collect())
+}
+
+#[tauri::command]
+pub fn get_dangerous_mode_cmd(_app: tauri::AppHandle) -> AppResult<bool> {
+    let path = settings_path();
+    match read_settings(&path)? {
+        None => Ok(false),
+        Some(value) => Ok(permissions::read(&value)),
+    }
+}
+
+#[tauri::command]
+pub fn set_dangerous_mode_cmd(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> AppResult<()> {
+    let app_state = app.state::<crate::state::AppState>();
+    let path = settings_path();
+    let backups = app_state.backups_dir();
+    permissions::set(&path, &backups, enabled)
 }
 
 /// Inspect the live env block (and, for Subscription, `.credentials.json`)
