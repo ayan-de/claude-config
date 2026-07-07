@@ -15,6 +15,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { toast } from "sonner";
 
 import { isWebEnv } from "@/lib/utils-app";
+import { version as appVersion } from "../../package.json";
 
 export type UpdaterState = {
   available: boolean;
@@ -58,7 +59,7 @@ export function useUpdater(): UpdaterState & UpdaterActions {
         setVersion(null);
         updateRef.current = null;
         if (showToastOnError) {
-          toast.success("You're up to date");
+          toast.success(`You're up to date (v${appVersion})`);
         }
       }
       setError(null);

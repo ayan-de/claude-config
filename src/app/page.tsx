@@ -13,6 +13,7 @@ import { TitleBar } from "@/components/TitleBar";
 import { DangerousModeConfirm } from "@/components/DangerousModeConfirm";
 
 import { GLOBAL_TABS } from "@/data/globalTabs";
+import { version as appVersion } from "../../package.json";
 
 export default function Page() {
   const providers = useProvidersApp();
@@ -83,6 +84,21 @@ export default function Page() {
         }
         actions={
           <div className="flex items-center gap-2 pr-2">
+            {updater.available && updater.version ? (
+              <button
+                type="button"
+                onClick={() => void updater.installUpdate()}
+                disabled={updater.downloading}
+                className="rounded-sm border border-foreground/10 bg-foreground/5 px-2 py-0.5 text-xs font-mono text-foreground backdrop-blur-sm transition hover:bg-foreground/10 disabled:opacity-60"
+                title="Click to update now"
+              >
+                Update Now (v{appVersion} → v{updater.version})
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground font-mono">
+                v{appVersion}
+              </span>
+            )}
             <SettingsMenu
               appDataDir={providers.appDataDir}
               claudeDir={providers.claudeDir}
