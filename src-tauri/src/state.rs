@@ -24,4 +24,10 @@ impl AppState {
     pub fn state_path(&self) -> PathBuf {
         self.app_data_dir.join("state.json")
     }
+    /// Per-provider tracker configs + cached usage snapshots. Each provider
+    /// can have at most one tracker; the file is the source of truth for
+    /// non-secret config fields, while secrets live in the OS keyring.
+    pub fn trackers_path(&self) -> PathBuf {
+        self.app_data_dir.join("trackers.json")
+    }
 }

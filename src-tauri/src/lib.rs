@@ -9,6 +9,7 @@ mod merge;
 mod models;
 mod state;
 mod storage;
+mod tracker;
 
 use commands::settings::write_state;
 use merge::derive_provider_name;
@@ -87,6 +88,12 @@ pub fn run() {
             commands::subscription::import_current_subscription_cmd,
             commands::transfer::export_providers_cmd,
             commands::transfer::import_providers_cmd,
+            commands::tracker::list_tracker_sources_cmd,
+            commands::tracker::get_tracker_config_cmd,
+            commands::tracker::save_tracker_config_cmd,
+            commands::tracker::delete_tracker_config_cmd,
+            commands::tracker::refresh_tracker_cmd,
+            commands::tracker::get_tracker_usage_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

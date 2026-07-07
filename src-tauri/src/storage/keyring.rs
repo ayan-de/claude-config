@@ -153,6 +153,94 @@ impl KeyringStore {
         }
     }
 
+    // --- Tracker secrets (separate namespace so provider + tracker
+    //     entries can't collide for the same provider id) ---
+
+    /// Compose the keyring account name for a (provider, field) secret.
+    /// Exposed for tests + the delete-all path.
+    pub fn tracker_account(provider_id: &str, field_key: &str) -> String {
+        format!("{provider_id}::{field_key}")
+    }
+
+    /// Account name prefix for a provider — exposed for callers that want
+    /// to enumerate entries (we don't currently do this; the storage
+    /// layer knows which fields a source declares and walks them).
+    #[allow(dead_code)]
+    pub fn tracker_provider_prefix(provider_id: &str) -> String {
+        format!("{provider_id}::")
+    }
+
+    /// Write one tracker secret. `field_key` is the source-specific key
+    /// the adapter expects (e.g. `"admin_api_key"`). The account name is
+    /// derived as `{provider_id}::{field_key}` so the entry is clearly
+    /// namespaced and won't collide with a `ProviderSecret` for the same
+    /// provider.
+    pub fn set_tracker_secret(
+        &self,
+        provider_id: &str,
+        field_key: &str,
+        value: &str,
+    ) -> Result<(), KeyringError> {
+        self.ensure_available()?;
+        let account = Self::tracker_account(provider_id, field_key);
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &account)
+            .map_err(|e| KeyringError::Backend(e.to_string()))?;
+        entry
+            .set_password(value)
+            .map_err(|e| KeyringError::Backend(e.to_string()))
+    }
+
+    /// Read one tracker secret. `None` when no entry exists (we never
+    /// bubble `NoEntry` as an error — it's the "not configured yet" state).
+    pub fn get_tracker_secret(
+        &self,
+        provider_id: &str,
+        field_key: &str,
+    ) -> Result<Option<String>, KeyringError> {
+        self.ensure_available()?;
+        let account = Self::tracker_account(provider_id, field_key);
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &account)
+            .map_err(|e| KeyringError::Backend(e.to_string()))?;
+        match entry.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(KeyringError::Backend(e.to_string())),
+        }
+    }
+
+    /// Delete one tracker secret. Idempotent.
+    pub fn delete_tracker_secret(
+        &self,
+        provider_id: &str,
+        field_key: &str,
+    ) -> Result<(), KeyringError> {
+        self.ensure_available()?;
+        let account = Self::tracker_account(provider_id, field_key);
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &account)
+            .map_err(|e| KeyringError::Backend(e.to_string()))?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(KeyringError::Backend(e.to_string())),
+        }
+    }
+
+    /// Delete every tracker secret for a given provider. Walks the keys
+    /// the caller knows about — there's no native "list entries" in the
+    /// `keyring` crate, so this only cleans up the fields the source
+    /// declares. The command layer iterates the source's `fields()` and
+    /// calls this per-key.
+    pub fn delete_tracker_secrets(
+        &self,
+        provider_id: &str,
+        field_keys: &[&str],
+    ) -> Result<(), KeyringError> {
+        for k in field_keys {
+            self.delete_tracker_secret(provider_id, k)?;
+        }
+        Ok(())
+    }
+
     fn ensure_available(&self) -> Result<(), KeyringError> {
         match &self.inner.status {
             KeyringStatus::Available => Ok(()),
