@@ -9,9 +9,9 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -104,13 +104,22 @@ export function SettingsMenu({
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuLabel>Safety</DropdownMenuLabel>
-          <DropdownMenuCheckboxItem
-            checked={dangerousMode === true}
-            onCheckedChange={() => onToggleDangerousMode()}
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              onToggleDangerousMode();
+            }}
             disabled={dangerousMode === null}
           >
-            Dangerous mode (skip permissions)
-          </DropdownMenuCheckboxItem>
+            <span className="flex-1">Dangerous mode (skip permissions)</span>
+            <Switch
+              checked={dangerousMode === true}
+              onCheckedChange={() => onToggleDangerousMode()}
+              disabled={dangerousMode === null}
+              // Stop the parent item from re-firing the click handler.
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            />
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
