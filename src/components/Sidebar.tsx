@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Globe, Layers, PanelLeftOpen, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,31 @@ export function Sidebar({
   // re-creates the `panel` object every render, which would defeat memo).
   const { activeTabId, openTab, close } = panel;
 
+  // Clicking a provider while a global tab is open must close the tab — the
+  // user is choosing to navigate to that provider, not stay on CLAUDE.md /
+  // Marketplace. Without this, Main keeps rendering the tab content because
+  // the `panel.activeTab` branch wins over the form branch.
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (activeTabId !== null) close();
+      onSelectProvider(id);
+    },
+    [activeTabId, close, onSelectProvider],
+  );
+
+  const handleLoad = useCallback(
+    (id: string) => {
+      if (activeTabId !== null) close();
+      onLoadProvider(id);
+    },
+    [activeTabId, close, onLoadProvider],
+  );
+
+  const handleNew = useCallback(() => {
+    if (activeTabId !== null) close();
+    onNewProvider();
+  }, [activeTabId, close, onNewProvider]);
+
   const sections = useMemo<SidebarSection[]>(
     () => [
       {
@@ -73,7 +98,7 @@ export function Sidebar({
                 <Button
                   size="xs"
                   variant="default"
-                  onClick={onNewProvider}
+                  onClick={handleNew}
                   title="New provider"
                   className="cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
                 >
@@ -90,15 +115,15 @@ export function Sidebar({
                     isActive={p.id === activeProviderId}
                     isSelected={!showEditor && p.id === editingProviderId}
                     isLoading={p.id === loadingProviderId}
-                    onSelect={() => onSelectProvider(p.id)}
-                    onLoad={() => onLoadProvider(p.id)}
+                    onSelect={() => handleSelect(p.id)}
+                    onLoad={() => handleLoad(p.id)}
                     onDelete={() => onDeleteProvider(p.id)}
                   />
                 ))}
                 <Button
                   size="xs"
                   variant="default"
-                  onClick={onNewProvider}
+                  onClick={handleNew}
                   title="New provider"
                   className="cursor-pointer self-center dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
                 >
@@ -140,10 +165,10 @@ export function Sidebar({
       activeTabId,
       openTab,
       close,
-      onSelectProvider,
-      onLoadProvider,
       onDeleteProvider,
-      onNewProvider,
+      handleSelect,
+      handleLoad,
+      handleNew,
     ],
   );
 
