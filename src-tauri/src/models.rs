@@ -213,24 +213,28 @@ pub struct ProviderInput {
     pub subscription_label: Option<String>,
 
     // -- Model / misc overrides --
-    #[serde(default)]
+    // The TS ProviderInputBase sends these as camelCase (matching the
+    // `Provider` saved-shape struct). Per-field renames keep the two sides
+    // in sync; without them, every model override + apiTimeoutMs + logoSvg
+    // silently deserializes to None and the form appears to "save nothing".
+    #[serde(rename = "model", default)]
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "smallFastModel", default)]
     pub small_fast_model: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "defaultSonnetModel", default)]
     pub default_sonnet_model: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "defaultOpusModel", default)]
     pub default_opus_model: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "defaultHaikuModel", default)]
     pub default_haiku_model: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "apiTimeoutMs", default)]
     pub api_timeout_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(rename = "disableNonessentialTraffic", default)]
     pub disable_nonessential_traffic: Option<bool>,
 
     /// Inline SVG markup for the provider's logo. Omitted from payloads when
     /// the user hasn't set one — see `Provider::logo_svg` for storage details.
-    #[serde(default)]
+    #[serde(rename = "logoSvg", default)]
     pub logo_svg: Option<String>,
 }
 /// tag must match the provider's `kind`; a mismatch indicates data corruption
@@ -443,6 +447,41 @@ mod tests {
             oauth: serde_json::json!({"accessToken": "abc"}),
         };
         assert_eq!(s.kind(), ProviderKind::Subscription);
+    }
+
+    #[test]
+    fn provider_input_round_trips_camel_case_form_payload() {
+        // Regression: the TS ProviderForm hook posts camelCase model override
+        // fields (smallFastModel, defaultSonnetModel, apiTimeoutMs, …).
+        // If ProviderInput loses those renames, the Rust side silently gets
+        // None for every model override and the form appears to "save nothing".
+        let raw = r#"{
+            "id": "abc",
+            "name": "My Provider",
+            "kind": "custom",
+            "base_url": "https://api.example.com",
+            "auth_token": "tok",
+            "model": "claude-sonnet-4-6",
+            "smallFastModel": "claude-haiku-4-5",
+            "defaultSonnetModel": "claude-sonnet-4-6",
+            "defaultOpusModel": "claude-opus-4-7",
+            "defaultHaikuModel": "claude-haiku-4-5",
+            "apiTimeoutMs": 120000,
+            "disableNonessentialTraffic": true,
+            "logoSvg": "<svg/>"
+        }"#;
+        let input: ProviderInput = serde_json::from_str(raw).unwrap();
+        assert_eq!(input.model.as_deref(), Some("claude-sonnet-4-6"));
+        assert_eq!(input.small_fast_model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(input.default_sonnet_model.as_deref(), Some("claude-sonnet-4-6"));
+        assert_eq!(input.default_opus_model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(input.default_haiku_model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(input.api_timeout_ms, Some(120_000));
+        assert_eq!(input.disable_nonessential_traffic, Some(true));
+        assert_eq!(input.logo_svg.as_deref(), Some("<svg/>"));
+        // Snake_case form (kind-specific union variants) still works.
+        assert_eq!(input.base_url.as_deref(), Some("https://api.example.com"));
+        assert_eq!(input.auth_token.as_deref(), Some("tok"));
     }
 
     #[test]
