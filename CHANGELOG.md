@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-07-07
+
+### Added
+- **App version in update notifications** — title bar now shows the current version (`v0.5.8`) next to the settings menu, and surfaces a clickable `Update Now (v0.5.8 → v0.5.9)` button when an update is available
+- "You're up to date" toast now includes the running version for confirmation (`v0.5.8`)
+
+### Changed
+- Dropdown menu items render with `cursor-pointer` (was `cursor-default`)
+
 ## [0.5.7] - 2026-07-07
 
 ### Added
