@@ -180,6 +180,9 @@ export function Main({
               onCancel={onCancelProviderForm}
               onSave={onSaveProviderForm}
               onSubscriptionImported={onSubscriptionImported}
+              onDelete={() => {
+                if (editingProvider) setDeleteTarget(editingProvider);
+              }}
               isSaving={saving}
             />
           ) : (

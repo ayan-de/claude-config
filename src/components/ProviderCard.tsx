@@ -1,7 +1,6 @@
 "use client";
 
-import { Loader2, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { cn } from "@/lib/utils";
 import type { Provider } from "@/lib/types";
@@ -23,7 +22,6 @@ export function ProviderCard({
   isLoading,
   onSelect,
   onLoad,
-  onDelete,
 }: Props) {
   // Determine clean display subtitle
   const getCleanSubtitle = () => {
@@ -88,9 +86,8 @@ export function ProviderCard({
         </div>
       </div>
 
-      {/* Right section: Toggle Switch / Actions */}
+      {/* Right section: Toggle Switch */}
       <div className="flex items-center gap-2 shrink-0">
-        {/* Switch */}
         <div
           className="tauri-no-drag"
           onClick={(e) => {
@@ -120,34 +117,6 @@ export function ProviderCard({
               )}
             </div>
           </div>
-        </div>
-
-        {/* Hover Actions overlay (floating toolbar to the left of the switch) */}
-        <div className="absolute right-[54px] top-1/2 -translate-y-1/2 flex items-center border bg-card/95 dark:bg-card/98 shadow-md rounded-lg p-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0 pointer-events-none group-hover:pointer-events-auto">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect();
-            }}
-            className="h-6 w-6 p-0 hover:bg-muted dark:hover:bg-muted/50 cursor-pointer"
-            aria-label="Edit"
-          >
-            <Pencil className="size-3 text-muted-foreground hover:text-foreground" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="h-6 w-6 p-0 hover:bg-destructive/10 cursor-pointer"
-            aria-label="Delete"
-          >
-            <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
-          </Button>
         </div>
       </div>
     </div>

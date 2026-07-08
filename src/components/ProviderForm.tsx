@@ -14,6 +14,7 @@ import {
   Plus,
   Settings2,
   Sparkles,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -58,6 +59,8 @@ interface Props {
   /** Called when the user opts to import a Subscription via
    *  `claude /login` snapshot. */
   onSubscriptionImported: (p: Provider) => void;
+  /** Only invoked in edit mode — opens the delete-confirmation dialog. */
+  onDelete: () => void;
   isSaving: boolean;
 }
 
@@ -98,6 +101,7 @@ export function ProviderForm({
   onCancel,
   onSave,
   onSubscriptionImported,
+  onDelete,
   isSaving,
 }: Props) {
   // When editing, the kind is locked to the existing provider's kind (the
@@ -187,6 +191,7 @@ export function ProviderForm({
       importing={importing}
       setImporting={setImporting}
       onSubscriptionImported={onSubscriptionImported}
+      onDelete={onDelete}
       modelsExpanded={modelsExpanded}
       setModelsExpanded={setModelsExpanded}
       advancedExpanded={advancedExpanded}
@@ -207,6 +212,7 @@ interface KindFormProps {
   importing: boolean;
   setImporting: (b: boolean) => void;
   onSubscriptionImported: (p: Provider) => void;
+  onDelete: () => void;
   modelsExpanded: boolean;
   setModelsExpanded: (b: boolean) => void;
   advancedExpanded: boolean;
@@ -225,6 +231,7 @@ function KindForm({
   importing,
   setImporting,
   onSubscriptionImported,
+  onDelete,
   modelsExpanded,
   setModelsExpanded,
   advancedExpanded,
@@ -676,18 +683,33 @@ function KindForm({
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <Button type="button" variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
-            {/* Subscription create is completed via the import button above;
-                only surface the primary submit for other kinds or when editing. */}
-            {!(kind === "subscription" && !editing) && (
-              <Button type="submit" disabled={!f.canSubmit}>
-                {isSaving && <Loader2 className="size-3.5 animate-spin" />}
-                {editing ? "Save changes" : "Create provider"}
+          <div className="flex items-center justify-between gap-2 pt-2">
+            {editing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onDelete}
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+              >
+                <Trash2 className="size-3.5" />
+                Delete
               </Button>
+            ) : (
+              <span />
             )}
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="ghost" onClick={onCancel}>
+                Cancel
+              </Button>
+              {/* Subscription create is completed via the import button above;
+                  only surface the primary submit for other kinds or when editing. */}
+              {!(kind === "subscription" && !editing) && (
+                <Button type="submit" disabled={!f.canSubmit}>
+                  {isSaving && <Loader2 className="size-3.5 animate-spin" />}
+                  {editing ? "Save changes" : "Create provider"}
+                </Button>
+              )}
+            </div>
           </div>
         </form>
         )}
