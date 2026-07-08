@@ -179,6 +179,26 @@
   button:not(:disabled) {
     @apply cursor-pointer;
   }
+  
+  /* Custom scrollbars - thin & primary */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--primary);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--primary), var(--foreground) 15%);
+  }
 }
 
 @layer utilities {
