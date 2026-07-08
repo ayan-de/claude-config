@@ -160,3 +160,23 @@ jobs:
               draft: false,
               prerelease: false,
             });
+
+      # Trigger a rebuild of the marketing site (claudeconfig.ayande.xyz on
+      # Vercel). Its download URLs, sizes, and checksums are synced from this
+      # repo's Releases API at build time, so it must rebuild after publish.
+      # Set VERCEL_DEPLOY_HOOK_URL in repo Settings → Secrets (create the hook
+      # in Vercel → Project → Settings → Git → Deploy Hooks). Non-fatal if unset.
+      - name: Rebuild marketing site
+        env:
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK_URL" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK_URL not set — skipping marketing-site rebuild."
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$HOOK_URL")
+          echo "Vercel deploy hook responded with HTTP $code"
+          case "$code" in
+            2*) echo "Marketing-site rebuild triggered." ;;
+            *)  echo "::warning::Deploy hook returned HTTP $code (release still published)." ;;
+          esac
