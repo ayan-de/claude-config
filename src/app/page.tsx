@@ -124,6 +124,7 @@ export default function Page() {
           activeProviderId={providers.active?.id ?? null}
           editingProviderId={editingProvider?.id ?? null}
           loadingProviderId={providers.loadingId}
+          session5hByProvider={providers.session5hByProvider}
           showEditor={panel.isOpen}
           onSelectProvider={providers.handleSelect}
           onLoadProvider={providers.handleLoad}

@@ -20,6 +20,7 @@ import {
   importProviders,
   keyringStatus,
   listProviders,
+  listTrackerUsage,
   loadProvider,
   revealInFileManager,
   saveCurrentAsProvider,
@@ -33,6 +34,13 @@ export type AppMode =
   | { kind: "idle" }
   | { kind: "creating" }
   | { kind: "editing"; provider: Provider };
+
+/**
+ * Matches "5h", "5h session", "5-hour session" — the labels our tracker
+ * sources use for the rolling-5-hour quota window. Ponytail: regex once,
+ * reused on every refresh.
+ */
+const FIVE_HOUR_RE = /^5[\s-]?h(our)?\s*session?$/i;
 
 export function useProvidersApp() {
   const [mounted, setMounted] = useState(false);
@@ -49,10 +57,15 @@ export function useProvidersApp() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Provider | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Per-provider tracker 5h session percentage for the sidebar progress
+  // bar. `null` = no tracker config / no 5h window. Keyed by provider id.
+  const [session5hByProvider, setSession5hByProvider] = useState<
+    Record<string, number>
+  >({});
 
   const refresh = useCallback(async () => {
     try {
-      const [list, activeP, krStatus, appDir, claudeD, envKeys] =
+      const [list, activeP, krStatus, appDir, claudeD, envKeys, trackerMap] =
         await Promise.all([
           listProviders(),
           getActiveProvider(),
@@ -60,7 +73,26 @@ export function useProvidersApp() {
           getAppDataDir(),
           discoverClaudeDir(),
           getSettingsEnvKeys(),
+          listTrackerUsage().catch(() => ({})),
         ]);
+
+      // Flatten each provider's cached usage into just the 5h session
+      // percent. The sidebar only needs this single value to draw the
+      // bar; everything else is owned by the Tracker tab.
+      const next: Record<string, number> = {};
+      for (const [providerId, usage] of Object.entries(trackerMap)) {
+        const w = usage.windows.find((x) => FIVE_HOUR_RE.test(x.label));
+        if (!w) continue;
+        const pct =
+          w.used_percent ??
+          (w.used !== null && w.limit && w.limit > 0
+            ? (w.used / w.limit) * 100
+            : null);
+        if (pct !== null && Number.isFinite(pct)) {
+          next[providerId] = Math.max(0, Math.min(100, pct));
+        }
+      }
+      setSession5hByProvider(next);
 
       // Enrich list and active provider with resolved logos if missing
       const enrichedList = await Promise.all(
@@ -328,6 +360,7 @@ export function useProvidersApp() {
     deleteTarget,
     deleting,
     keyringAvailable,
+    session5hByProvider,
     setDeleteTarget,
     sidebarCollapsed,
     toggleSidebar,

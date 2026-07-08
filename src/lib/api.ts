@@ -168,3 +168,12 @@ export const refreshTracker = (providerId: string) =>
 
 export const getTrackerUsage = (providerId: string) =>
   call<TrackerUsage | null>("get_tracker_usage_cmd", { providerId });
+
+/**
+ * Bulk-fetch the cached usage snapshot for every provider that has one.
+ * Used by the sidebar to render per-provider progress bars without
+ * fanning out N IPC calls. Providers with no tracker config are simply
+ * absent from the map.
+ */
+export const listTrackerUsage = () =>
+  call<Record<string, TrackerUsage>>("list_tracker_usage_cmd");
