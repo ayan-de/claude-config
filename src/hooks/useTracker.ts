@@ -61,12 +61,10 @@ export function useTracker(providerId: string | null): TrackerState {
     if (!providerId) return;
     setRefreshing(true);
     try {
-      await refreshTracker(providerId);
-      // Re-read the config to pick up the new cached usage snapshot AND
-      // any updated `last_error`. The refresh command itself returns the
-      // new usage, but reading through the config view keeps the
-      // component state shape consistent.
-      const fresh = await getTrackerConfig(providerId);
+      // The backend now returns the full config view (including updated
+      // usage + last_error) in one shot, so we no longer need a second
+      // getTrackerConfig round-trip.
+      const fresh = await refreshTracker(providerId);
       setConfig(fresh);
       setLastError(fresh.last_error ?? null);
     } catch (e) {

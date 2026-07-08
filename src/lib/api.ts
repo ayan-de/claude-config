@@ -164,7 +164,7 @@ export const deleteTrackerConfig = (providerId: string) =>
   call<void>("delete_tracker_config_cmd", { providerId });
 
 export const refreshTracker = (providerId: string) =>
-  call<TrackerUsage>("refresh_tracker_cmd", { providerId });
+  call<TrackerConfigView>("refresh_tracker_cmd", { providerId });
 
 export const getTrackerUsage = (providerId: string) =>
   call<TrackerUsage | null>("get_tracker_usage_cmd", { providerId });

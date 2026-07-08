@@ -53,7 +53,8 @@ fn http_client() -> &'static Client {
                 env!("CARGO_PKG_VERSION"),
                 " (tracker)"
             ))
-            .timeout(std::time::Duration::from_secs(20))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("reqwest client build should not fail with default config")
     })
@@ -248,19 +249,35 @@ pub fn delete_tracker_config_cmd(
     Ok(())
 }
 
-/// Triggers a refresh. Returns the new usage snapshot. On failure the
-/// last_error is updated in `trackers.json` and the error is also
-/// returned to the caller so the UI can show a toast.
+/// Triggers a refresh. Returns the updated config view (including the
+/// new usage snapshot and any error) so the frontend can update in a
+/// single round-trip.
+///
+/// The blocking HTTP work is offloaded to `spawn_blocking` so the
+/// Tauri main thread stays free and the UI doesn't freeze.
 #[tauri::command]
-pub fn refresh_tracker_cmd(
+pub async fn refresh_tracker_cmd(
     state: tauri::State<'_, AppState>,
     provider_id: String,
-) -> AppResult<TrackerUsage> {
+) -> AppResult<TrackerConfigView> {
+    // Clone what we need — AppState is cheap (Arc internals).
+    let state = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || refresh_tracker_blocking(&state, &provider_id))
+        .await
+        .map_err(|e| AppError::Internal(format!("refresh task panicked: {e}")))?
+}
+
+/// The actual refresh logic, run on a blocking thread.
+fn refresh_tracker_blocking(
+    state: &AppState,
+    provider_id: &str,
+) -> AppResult<TrackerConfigView> {
     let path = state.trackers_path();
     let mut file = load_trackers_file(&path)?;
     let cfg = file
         .trackers
-        .get(&provider_id)
+        .get(provider_id)
         .cloned()
         .ok_or_else(|| AppError::NotFound(format!("no tracker config for provider {provider_id}")))?;
     let source = registry()
@@ -269,16 +286,20 @@ pub fn refresh_tracker_cmd(
 
     // Reassemble the full config blob (secrets injected from keyring).
     let mut full_blob = cfg.fields.clone();
-    for f in source.fields() {
-        if f.secret {
-            if let Some(v) = state.keyring.get_tracker_secret(&provider_id, f.key)? {
-                full_blob.insert(f.key.to_string(), serde_json::Value::String(v));
-            }
+    let secret_keys: Vec<&'static str> = source
+        .fields()
+        .iter()
+        .filter(|f| f.secret)
+        .map(|f| f.key)
+        .collect();
+    for k in &secret_keys {
+        if let Some(v) = state.keyring.get_tracker_secret(provider_id, k)? {
+            full_blob.insert((*k).to_string(), serde_json::Value::String(v));
         }
     }
 
     let now = Utc::now().to_rfc3339();
-    let entry = file.trackers.get_mut(&provider_id).unwrap();
+    let entry = file.trackers.get_mut(provider_id).unwrap();
     entry.last_fetched_at = Some(now.clone());
 
     let result = source.fetch_usage(&full_blob, http_client());
@@ -292,7 +313,35 @@ pub fn refresh_tracker_cmd(
         }
     }
     save_trackers_file(&path, &file)?;
-    result
+
+    // Build the view from the entry we just saved.
+    let saved = file.trackers.get(provider_id).unwrap();
+    let mut view_fields = saved.fields.clone();
+    for k in &secret_keys {
+        view_fields.remove(*k);
+    }
+    // On fetch error, return Ok with the error embedded in the view
+    // rather than propagating — the UI needs the view to update.
+    if let Err(ref e) = result {
+        return Ok(TrackerConfigView {
+            source: saved.source.clone(),
+            fields: view_fields,
+            last_usage: saved.last_usage.clone(),
+            last_fetched_at: saved.last_fetched_at.clone(),
+            last_error: Some(e.to_string()),
+            updated_at: saved.updated_at.clone(),
+            has_secret: secret_keys.into_iter().map(String::from).collect(),
+        });
+    }
+    Ok(TrackerConfigView {
+        source: saved.source.clone(),
+        fields: view_fields,
+        last_usage: saved.last_usage.clone(),
+        last_fetched_at: saved.last_fetched_at.clone(),
+        last_error: None,
+        updated_at: saved.updated_at.clone(),
+        has_secret: secret_keys.into_iter().map(String::from).collect(),
+    })
 }
 
 /// Returns the cached usage without re-fetching. Used by the UI on mount
