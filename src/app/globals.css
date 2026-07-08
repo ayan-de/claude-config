@@ -181,6 +181,12 @@
   .animate-fluid-shimmer {
     animation: fluid-shimmer 4s infinite ease-in-out;
   }
+  .animate-wave-vertical-slow {
+    animation: wave-vertical-anim 7s infinite linear;
+  }
+  .animate-wave-vertical-fast {
+    animation: wave-vertical-anim 4s infinite linear;
+  }
   @keyframes fluid-shimmer {
     0% {
       transform: translateX(-100%);
@@ -190,6 +196,14 @@
     }
     100% {
       transform: translateX(100%);
+    }
+  }
+  @keyframes wave-vertical-anim {
+    0% {
+      transform: translateY(0);
+    }
+    100% {
+      transform: translateY(-50%);
     }
   }
 }
