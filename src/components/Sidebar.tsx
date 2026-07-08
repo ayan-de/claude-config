@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Globe, Layers, PanelLeftOpen, Plus } from "lucide-react";
+import {
+  BarChart3,
+  Globe,
+  Layers,
+  PanelLeftOpen,
+  Plus,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ProviderCard } from "@/components/ProviderCard";
@@ -86,6 +92,11 @@ export function Sidebar({
     onNewProvider();
   }, [activeTabId, close, onNewProvider]);
 
+  const handleUsage = useCallback(() => {
+    if (activeTabId === "usage") close();
+    else openTab("usage");
+  }, [activeTabId, openTab, close]);
+
   const sections = useMemo<SidebarSection[]>(
     () => [
       {
@@ -99,16 +110,28 @@ export function Sidebar({
                 <p className="text-[10px] text-muted-foreground">
                   No providers configured
                 </p>
-                <Button
-                  size="xs"
-                  variant="default"
-                  onClick={handleNew}
-                  title="New provider"
-                  className="cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
-                >
-                  <Plus className="size-3" />
-                  New
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={handleUsage}
+                    title="View usage"
+                    className="cursor-pointer"
+                  >
+                    <BarChart3 className="size-3" />
+                    Usage
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={handleNew}
+                    title="New provider"
+                    className="cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
+                  >
+                    <Plus className="size-3" />
+                    New
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
@@ -125,16 +148,28 @@ export function Sidebar({
                     onDelete={() => onDeleteProvider(p.id)}
                   />
                 ))}
-                <Button
-                  size="xs"
-                  variant="default"
-                  onClick={handleNew}
-                  title="New provider"
-                  className="cursor-pointer self-center dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
-                >
-                  <Plus className="size-3" />
-                  New
-                </Button>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={handleUsage}
+                    title="View usage"
+                    className="cursor-pointer"
+                  >
+                    <BarChart3 className="size-3" />
+                    Usage
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={handleNew}
+                    title="New provider"
+                    className="cursor-pointer dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]"
+                  >
+                    <Plus className="size-3" />
+                    New
+                  </Button>
+                </div>
               </>
             )}
           </div>
@@ -175,6 +210,7 @@ export function Sidebar({
       handleSelect,
       handleLoad,
       handleNew,
+      handleUsage,
     ],
   );
 

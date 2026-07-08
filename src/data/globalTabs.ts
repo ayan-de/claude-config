@@ -1,6 +1,13 @@
 "use client";
 
-import { FileText, PlugZap, Sparkles, Store, type LucideIcon } from "lucide-react";
+import {
+  BarChart3,
+  FileText,
+  PlugZap,
+  Sparkles,
+  Store,
+  type LucideIcon,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
@@ -19,6 +26,7 @@ import {
   SkillsSidebarButton,
   SkillsView,
 } from "@/components/Skills";
+import { UsageSidebarButton, UsageView } from "@/components/Usage";
 
 export interface GlobalTabProps {
   /** Called when the tab wants to close itself (e.g. Cancel / back button). */
@@ -88,6 +96,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Browse MCP servers Claude Code connects to — globally configured in ~/.claude.json.",
     SidebarButton: McpSidebarButton,
     Component: McpView,
+  },
+  {
+    id: "usage",
+    label: "Usage",
+    icon: BarChart3,
+    tooltip:
+      "See the latest cached usage snapshot across every provider with a configured tracker.",
+    SidebarButton: UsageSidebarButton,
+    Component: UsageView,
   },
 ];
 
