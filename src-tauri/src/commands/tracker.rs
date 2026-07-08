@@ -28,6 +28,7 @@
 //! atomic (tempfile + rename), so the worst case is a wasted network
 //! call.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use chrono::Utc;
@@ -307,4 +308,23 @@ pub fn get_tracker_usage_cmd(
         .trackers
         .get(&provider_id)
         .and_then(|c| c.last_usage.clone()))
+}
+
+/// Returns the cached usage snapshot for every provider in one shot.
+/// Used by the sidebar to render per-provider progress bars without
+/// fanning out N IPC calls. Missing entries mean "no tracker config
+/// for that provider"; a `Some(None)` would mean "tracker exists but
+/// hasn't fetched yet" — we collapse that to `None` to keep the map
+/// shape minimal. Ponytail: one file read, one IPC.
+#[tauri::command]
+pub fn list_tracker_usage_cmd(
+    state: tauri::State<'_, AppState>,
+) -> AppResult<HashMap<String, TrackerUsage>> {
+    let path = state.trackers_path();
+    let file = load_trackers_file(&path)?;
+    Ok(file
+        .trackers
+        .into_iter()
+        .filter_map(|(id, cfg)| cfg.last_usage.map(|u| (id, u)))
+        .collect())
 }

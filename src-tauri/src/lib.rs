@@ -94,6 +94,7 @@ pub fn run() {
             commands::tracker::delete_tracker_config_cmd,
             commands::tracker::refresh_tracker_cmd,
             commands::tracker::get_tracker_usage_cmd,
+            commands::tracker::list_tracker_usage_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
