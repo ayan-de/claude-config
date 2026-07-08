@@ -131,15 +131,18 @@ export function ProviderCard({
         >
           <div
             className={cn(
-              "h-full opacity-[0.07] transition-all duration-500",
+              "h-full opacity-[0.07] transition-all duration-500 relative bg-gradient-to-r",
               session5hPct >= 80
-                ? "bg-rose-500"
+                ? "from-rose-500 to-red-600"
                 : session5hPct >= 50
-                ? "bg-amber-500"
-                : "bg-emerald-500"
+                ? "from-amber-500 to-orange-500"
+                : "from-emerald-500 to-teal-500"
             )}
             style={{ width: `${Math.max(0, Math.min(100, session5hPct))}%` }}
-          />
+          >
+            {/* Shimmer fluid light element */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/45 to-transparent -translate-x-full animate-fluid-shimmer" />
+          </div>
         </div>
       )}
     </div>

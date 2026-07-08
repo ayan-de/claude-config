@@ -178,4 +178,18 @@
   .tauri-no-drag {
     -webkit-app-region: no-drag;
   }
+  .animate-fluid-shimmer {
+    animation: fluid-shimmer 4s infinite ease-in-out;
+  }
+  @keyframes fluid-shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    40% {
+      transform: translateX(100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
 }
