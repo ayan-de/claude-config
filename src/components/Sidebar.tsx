@@ -25,6 +25,9 @@ interface Props {
   /** ID of the provider being edited in <ProviderForm>. Drives the selected state. */
   editingProviderId: string | null;
   loadingProviderId: string | null;
+  /** Per-provider 5h-session usage percent (0..100) for the sidebar bar.
+   *  Absent keys mean "no tracker configured". */
+  session5hByProvider: Record<string, number>;
   /** True when a global tab (CLAUDE.md etc.) is open — de-highlights providers. */
   showEditor: boolean;
   onSelectProvider: (id: string) => void;
@@ -46,6 +49,7 @@ export function Sidebar({
   activeProviderId,
   editingProviderId,
   loadingProviderId,
+  session5hByProvider,
   showEditor,
   onSelectProvider,
   onLoadProvider,
@@ -115,6 +119,7 @@ export function Sidebar({
                     isActive={p.id === activeProviderId}
                     isSelected={!showEditor && p.id === editingProviderId}
                     isLoading={p.id === loadingProviderId}
+                    session5hPct={session5hByProvider[p.id] ?? null}
                     onSelect={() => handleSelect(p.id)}
                     onLoad={() => handleLoad(p.id)}
                     onDelete={() => onDeleteProvider(p.id)}
@@ -162,6 +167,7 @@ export function Sidebar({
       editingProviderId,
       loadingProviderId,
       showEditor,
+      session5hByProvider,
       activeTabId,
       openTab,
       close,

@@ -10,6 +10,8 @@ interface Props {
   isActive: boolean;
   isSelected: boolean;
   isLoading: boolean;
+  /** 5h-session usage percent (0..100). `null` hides the bar. */
+  session5hPct: number | null;
   onSelect: () => void;
   onLoad: () => void;
   onDelete: () => void;
@@ -20,6 +22,7 @@ export function ProviderCard({
   isActive,
   isSelected,
   isLoading,
+  session5hPct,
   onSelect,
   onLoad,
 }: Props) {
@@ -119,6 +122,26 @@ export function ProviderCard({
           </div>
         </div>
       </div>
+
+      {/* 5h session progress overlay — covers full card background with low opacity, fills left-to-right */}
+      {session5hPct !== null && (
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl"
+          aria-hidden="true"
+        >
+          <div
+            className={cn(
+              "h-full opacity-[0.07] transition-all duration-500",
+              session5hPct >= 80
+                ? "bg-rose-500"
+                : session5hPct >= 50
+                ? "bg-amber-500"
+                : "bg-emerald-500"
+            )}
+            style={{ width: `${Math.max(0, Math.min(100, session5hPct))}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
