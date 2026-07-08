@@ -47,6 +47,16 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --animate-edge-shimmer: edge-shimmer 2s linear infinite;
+
+  @keyframes edge-shimmer {
+    0% {
+      background-position: 0% 0%;
+    }
+    100% {
+      background-position: 0% -200%;
+    }
+  }
 }
 
 :root {

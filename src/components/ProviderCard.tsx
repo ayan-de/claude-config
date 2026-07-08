@@ -129,17 +129,34 @@ export function ProviderCard({
           className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl"
           aria-hidden="true"
         >
+          {/* Progress fill */}
           <div
             className={cn(
-              "h-full opacity-[0.07] transition-all duration-500 bg-gradient-to-r",
+              "h-full transition-all duration-500 bg-gradient-to-r",
               session5hPct >= 80
-                ? "from-rose-500 to-red-600"
+                ? "opacity-[0.07] from-rose-500 to-red-600"
                 : session5hPct >= 50
-                ? "from-amber-500 to-orange-500"
-                : "from-emerald-500 to-teal-500"
+                ? "opacity-[0.07] from-amber-500 to-orange-500"
+                : "opacity-20 from-primary to-primary/80"
             )}
             style={{ width: `${Math.max(0, Math.min(100, session5hPct))}%` }}
           />
+          {/* Edge glowing wave shimmer line */}
+          {session5hPct > 0 && session5hPct < 100 && (
+            <div
+              className={cn(
+                "absolute top-0 bottom-0 w-[2px] transition-all duration-500 bg-gradient-to-b from-transparent via-current to-transparent bg-[size:100%_200%] animate-edge-shimmer shadow-[0_0_8px_currentColor]",
+                session5hPct >= 80
+                  ? "text-rose-500/80"
+                  : session5hPct >= 50
+                  ? "text-amber-500/80"
+                  : "text-primary/80"
+              )}
+              style={{
+                left: `calc(${Math.max(0, Math.min(100, session5hPct))}% - 1px)`,
+              }}
+            />
+          )}
         </div>
       )}
     </div>
