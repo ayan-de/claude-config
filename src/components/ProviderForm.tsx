@@ -264,20 +264,43 @@ function KindForm({
     <Card className="border-border/60">
       <CardHeader className="pb-3">
         {editing ? (
-          <div className="flex items-center gap-2">
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
-                aria-label="Back"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-            )}
-            <CardTitle className="text-base">
-              Edit “{editing.name}”
-            </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              {onBack && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="text-muted-foreground hover:text-foreground cursor-pointer"
+                  aria-label="Back"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+              )}
+              <div className="relative size-8 rounded-lg border bg-muted/20 flex items-center justify-center shrink-0 overflow-hidden">
+                <ProviderLogo
+                  svg={editing.logoSvg}
+                  size={20}
+                  className="rounded"
+                />
+              </div>
+              <CardTitle className="text-base truncate">
+                {editing.name}
+              </CardTitle>
+            </div>
+            <div className="flex items-center gap-1">
+              <TabButton
+                active={tab === "configuration"}
+                onClick={() => setTab("configuration")}
+                icon={<Settings2 className="size-3.5" />}
+                label="Configuration"
+              />
+              <TabButton
+                active={tab === "tracker"}
+                onClick={() => setTab("tracker")}
+                icon={<Sparkles className="size-3.5" />}
+                label="Tracker"
+              />
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-5">
@@ -307,9 +330,6 @@ function KindForm({
           </div>
         )}
       </CardHeader>
-      {editing && (
-        <FormTabs tab={tab} setTab={setTab} />
-      )}
       <CardContent>
         {editing && tab === "tracker" ? (
           <TrackerTab
@@ -734,33 +754,6 @@ interface SecretInputProps {
  * is intentionally outside the tabs so the user always has a way to
  * dismiss the modal, regardless of which tab is active.
  */
-function FormTabs({
-  tab,
-  setTab,
-}: {
-  tab: ProviderFormTab;
-  setTab: (t: ProviderFormTab) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 border-b border-border/40 px-5 py-1.5">
-      <div className="flex items-center gap-1">
-        <TabButton
-          active={tab === "configuration"}
-          onClick={() => setTab("configuration")}
-          icon={<Settings2 className="size-3.5" />}
-          label="Configuration"
-        />
-        <TabButton
-          active={tab === "tracker"}
-          onClick={() => setTab("tracker")}
-          icon={<Sparkles className="size-3.5" />}
-          label="Tracker"
-        />
-      </div>
-    </div>
-  );
-}
-
 function TabButton({
   active,
   onClick,
@@ -860,30 +853,18 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
           </div>
         </div>
 
-        <div className="flex items-start gap-4">
-          {/* Left column: Circular logo preview (locked) */}
-          <div className="shrink-0 pt-1.5 flex flex-col items-center gap-1.5">
-            <div className="relative size-16 rounded-full border border-solid flex items-center justify-center bg-muted/10 overflow-hidden">
-              <ProviderLogo svg={editing.logoSvg} size={44} className="rounded-full" />
-            </div>
-          </div>
-
-          {/* Right column: Base URL field */}
-          <div className="flex-1 min-w-0">
-            <div className="space-y-1.5">
-              <Label htmlFor="baseUrl">Base URL</Label>
-              <Input
-                id="baseUrl"
-                value={f.baseUrl}
-                onChange={(e) => f.setBaseUrl(e.target.value)}
-                placeholder="https://api.example.com"
-                className={cn(f.urlError && "border-destructive")}
-              />
-              {f.urlError && (
-                <p className="text-xs text-destructive">{f.urlError}</p>
-              )}
-            </div>
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="baseUrl">Base URL</Label>
+          <Input
+            id="baseUrl"
+            value={f.baseUrl}
+            onChange={(e) => f.setBaseUrl(e.target.value)}
+            placeholder="https://api.example.com"
+            className={cn(f.urlError && "border-destructive")}
+          />
+          {f.urlError && (
+            <p className="text-xs text-destructive">{f.urlError}</p>
+          )}
         </div>
 
         {/* Auth token (full width) */}
