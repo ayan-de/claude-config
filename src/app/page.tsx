@@ -103,14 +103,19 @@ export default function Page() {
               appDataDir={providers.appDataDir}
               claudeDir={providers.claudeDir}
               updateAvailable={updater.available}
+              updateVersion={updater.version}
+              updateDownloading={updater.downloading}
               updateError={updater.error}
               onRevealAppDir={providers.handleRevealAppDir}
               onRevealClaudeDir={providers.handleRevealClaudeDir}
               onExport={providers.handleExport}
               onImport={providers.handleImport}
               onCheckForUpdates={updater.checkNow}
+              onInstallUpdate={updater.installUpdate}
               dangerousMode={dangerous.enabled}
               onToggleDangerousMode={dangerous.toggle}
+              trackerRefreshInterval={providers.trackerRefreshInterval}
+              onTrackerRefreshIntervalChange={providers.setTrackerRefreshInterval}
             />
           </div>
         }

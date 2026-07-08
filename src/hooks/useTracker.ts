@@ -67,6 +67,9 @@ export function useTracker(providerId: string | null): TrackerState {
       const fresh = await refreshTracker(providerId);
       setConfig(fresh);
       setLastError(fresh.last_error ?? null);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tracker-changed"));
+      }
     } catch (e) {
       setLastError((e as Error).message);
     } finally {
@@ -125,6 +128,9 @@ export function useTracker(providerId: string | null): TrackerState {
         setConfig(view);
         setLastError(null);
         toast.success("Tracker saved");
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("tracker-changed"));
+        }
       } catch (e) {
         setLastError((e as Error).message);
         toast.error(`Save failed: ${(e as Error).message}`);
@@ -144,6 +150,9 @@ export function useTracker(providerId: string | null): TrackerState {
       setConfig(undefined);
       setLastError(null);
       toast.success("Tracker removed");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tracker-changed"));
+      }
     } catch (e) {
       setLastError((e as Error).message);
       toast.error(`Remove failed: ${(e as Error).message}`);

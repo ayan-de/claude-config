@@ -7,9 +7,11 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Upload,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,34 +20,49 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 
 interface Props {
   appDataDir: string | null;
   claudeDir: string | null;
   updateAvailable: boolean;
+  updateVersion: string | null;
+  updateDownloading: boolean;
   updateError: string | null;
   onRevealAppDir: () => void;
   onRevealClaudeDir: () => void;
   onExport: (includeSecrets: boolean) => void;
   onImport: () => void;
   onCheckForUpdates: () => void;
+  onInstallUpdate: () => void;
   dangerousMode: boolean | null;
   onToggleDangerousMode: () => void;
+  trackerRefreshInterval: number;
+  onTrackerRefreshIntervalChange: (interval: number) => void;
 }
 
 export function SettingsMenu({
   appDataDir,
   claudeDir,
   updateAvailable,
+  updateVersion,
+  updateDownloading,
   updateError,
   onRevealAppDir,
   onRevealClaudeDir,
   onExport,
   onImport,
   onCheckForUpdates,
+  onInstallUpdate,
   dangerousMode,
   onToggleDangerousMode,
+  trackerRefreshInterval,
+  onTrackerRefreshIntervalChange,
 }: Props) {
   return (
     <DropdownMenu>
@@ -123,7 +140,45 @@ export function SettingsMenu({
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
+          <DropdownMenuLabel>Tracker Polling</DropdownMenuLabel>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Clock className="size-4" />
+              <span className="flex-1">Interval</span>
+              <span className="ml-2 text-[10px] text-muted-foreground">
+                {trackerRefreshInterval === 60000 ? "1 min" : trackerRefreshInterval === 300000 ? "5 min" : "Paused"}
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-40">
+              <DropdownMenuRadioGroup
+                value={trackerRefreshInterval.toString()}
+                onValueChange={(val) => onTrackerRefreshIntervalChange(parseInt(val, 10))}
+              >
+                <DropdownMenuRadioItem value="60000">1 minute</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="300000">5 minutes</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="0">Paused</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
           <DropdownMenuLabel>Updates</DropdownMenuLabel>
+          {updateAvailable && (
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.preventDefault();
+                onInstallUpdate();
+              }}
+              disabled={updateDownloading}
+              className="text-emerald-500 focus:bg-emerald-500/10 focus:text-emerald-500 dark:focus:bg-emerald-500/20"
+            >
+              <Download className={cn("size-4", updateDownloading ? "animate-pulse" : "animate-bounce")} />
+              <span className="flex-1 font-semibold">
+                {updateDownloading ? "Downloading update..." : `Install update (v${updateVersion})`}
+              </span>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={onCheckForUpdates}>
             <RefreshCw />
             <span className="flex-1">Check for updates</span>

@@ -22,6 +22,7 @@ import {
   listProviders,
   listTrackerUsage,
   loadProvider,
+  refreshTracker,
   revealInFileManager,
   saveCurrentAsProvider,
   updateProvider,
@@ -62,6 +63,8 @@ export function useProvidersApp() {
   const [session5hByProvider, setSession5hByProvider] = useState<
     Record<string, number>
   >({});
+  const [trackerRefreshInterval, setTrackerRefreshIntervalState] = useState<number>(60000);
+  const [trackerProviderIds, setTrackerProviderIds] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -93,6 +96,7 @@ export function useProvidersApp() {
         }
       }
       setSession5hByProvider(next);
+      setTrackerProviderIds(Object.keys(trackerMap));
 
       // Enrich list and active provider with resolved logos if missing
       const enrichedList = await Promise.all(
@@ -136,6 +140,85 @@ export function useProvidersApp() {
     if (isWebEnv()) {
       void refresh();
     }
+  }, [refresh]);
+
+  // Load refresh interval on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("tracker_refresh_interval");
+      if (stored !== null) {
+        const val = parseInt(stored, 10);
+        if ([60000, 300000, 0].includes(val)) {
+          setTrackerRefreshIntervalState(val);
+        }
+      }
+    }
+  }, []);
+
+  const setTrackerRefreshInterval = useCallback((interval: number) => {
+    setTrackerRefreshIntervalState(interval);
+    localStorage.setItem("tracker_refresh_interval", interval.toString());
+  }, []);
+
+  // Background polling for trackers
+  useEffect(() => {
+    if (trackerRefreshInterval <= 0 || trackerProviderIds.length === 0 || !isWebEnv()) {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const results = await Promise.all(
+          trackerProviderIds.map(async (id) => {
+            try {
+              return { id, view: await refreshTracker(id) };
+            } catch (e) {
+              console.error(`Background refresh failed for provider ${id}`, e);
+              return { id, view: null };
+            }
+          })
+        );
+
+        setSession5hByProvider((prev) => {
+          const next = { ...prev };
+          for (const { id, view } of results) {
+            if (!view) continue;
+            const w = view.last_usage?.windows.find((x) => FIVE_HOUR_RE.test(x.label));
+            if (!w) {
+              delete next[id];
+              continue;
+            }
+            const pct =
+              w.used_percent ??
+              (w.used !== null && w.limit && w.limit > 0
+                ? (w.used / w.limit) * 100
+                : null);
+            if (pct !== null && Number.isFinite(pct)) {
+              next[id] = Math.max(0, Math.min(100, pct));
+            } else {
+              delete next[id];
+            }
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error("Failed to run background tracker refresh", err);
+      }
+    }, trackerRefreshInterval);
+
+    return () => clearInterval(interval);
+  }, [trackerRefreshInterval, trackerProviderIds]);
+
+  // Listen for the custom tracker-changed event to sync updates immediately
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleTrackerChanged = () => {
+      void refresh();
+    };
+    window.addEventListener("tracker-changed", handleTrackerChanged);
+    return () => {
+      window.removeEventListener("tracker-changed", handleTrackerChanged);
+    };
   }, [refresh]);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -376,5 +459,7 @@ export function useProvidersApp() {
     handleRevealClaudeDir,
     handleExport,
     handleImport,
+    trackerRefreshInterval,
+    setTrackerRefreshInterval,
   };
 }
