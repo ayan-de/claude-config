@@ -131,7 +131,7 @@ export function ProviderCard({
         >
           <div
             className={cn(
-              "h-full opacity-[0.07] transition-all duration-500 relative bg-gradient-to-r",
+              "h-full opacity-[0.07] transition-all duration-500 bg-gradient-to-r",
               session5hPct >= 80
                 ? "from-rose-500 to-red-600"
                 : session5hPct >= 50
@@ -139,30 +139,7 @@ export function ProviderCard({
                 : "from-emerald-500 to-teal-500"
             )}
             style={{ width: `${Math.max(0, Math.min(100, session5hPct))}%` }}
-          >
-            {/* Shimmer fluid light element */}
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/45 to-transparent -translate-x-full animate-fluid-shimmer" />
-
-            {/* Dual animated vertical waves along the leading edge */}
-            <div className="absolute inset-y-0 right-0 w-3 overflow-hidden pointer-events-none">
-              {/* Back wave */}
-              <svg
-                viewBox="0 0 20 200"
-                className="absolute inset-y-0 right-0 h-[200%] w-full animate-wave-vertical-slow text-white/20 fill-current"
-                preserveAspectRatio="none"
-              >
-                <path d="M0,0 C10,12.5 10,12.5 0,25 C10,37.5 10,37.5 0,50 C10,62.5 10,62.5 0,75 C10,87.5 10,87.5 0,100 C10,112.5 10,112.5 0,125 C10,137.5 10,137.5 0,150 C10,162.5 10,162.5 0,175 C10,187.5 10,187.5 0,200 L20,200 L20,0 Z" />
-              </svg>
-              {/* Front wave */}
-              <svg
-                viewBox="0 0 20 200"
-                className="absolute inset-y-0 right-0 h-[200%] w-full animate-wave-vertical-fast text-white/40 fill-current -mr-[1px]"
-                preserveAspectRatio="none"
-              >
-                <path d="M0,0 C12,12.5 12,12.5 0,25 C12,37.5 12,37.5 0,50 C12,62.5 12,62.5 0,75 C12,87.5 12,87.5 0,100 C12,112.5 12,112.5 0,125 C12,137.5 12,137.5 0,150 C12,162.5 12,162.5 0,175 C12,187.5 12,187.5 0,200 L20,200 L20,0 Z" />
-              </svg>
-            </div>
-          </div>
+          />
         </div>
       )}
     </div>
