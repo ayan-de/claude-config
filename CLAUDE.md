@@ -1,100 +1,47 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This repo uses Next.js 16. Read the relevant guide in `node_modules/next/dist/docs/` before changing framework-level code, and heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Project: Claude Config
+# Claude Config
 
-Tauri 2 desktop app (Next.js 16 frontend, Rust backend) that manages Claude Code
-provider profiles. The README has the full architecture and provider data model
-— read it for the "why" before changing things.
+Tauri 2 desktop app with a Next.js 16 static-export frontend and Rust backend. Read `README.md` first for the provider model and storage contract.
 
-# Commands
+## Commands
 
-The frontend and the desktop shell are coupled. Use the Tauri-wrapped scripts:
+- Use `pnpm tauri dev` for real app work. `src-tauri/tauri.conf.json` wires this to `pnpm dev` plus the Tauri shell; plain `pnpm dev` only shows the browser stub.
+- Use `pnpm tauri build` for production bundles. Tauri runs `pnpm build` first and emits installers under `src-tauri/target/release/bundle/`.
+- Verification is separate: `pnpm lint`, `pnpm exec tsc --noEmit`, `cd src-tauri && cargo test`.
+- Keyring integration is only covered by `cd src-tauri && cargo test -- --ignored keyring`; it exercises the real OS keyring and is environment-dependent.
+- There is no JS/TS unit-test runner in this repo.
 
-- Dev (Next.js on :3000 + Tauri window): `pnpm tauri dev`
-- Production build (platform-native installer in `src-tauri/target/release/bundle/`): `pnpm tauri build`
-- Plain `pnpm dev` only runs the Next.js dev server with no Tauri host.
+## Frontend
 
-Lint, typecheck, and tests run independently:
+- The app is a static SPA: `next.config.ts` sets `output: "export"`, `trailingSlash: true`, and `images.unoptimized = true`. Do not add SSR, API routes, or server-only Next features.
+- `src/app/page.tsx` is the shell; operational state now lives in hooks such as `src/hooks/useProvidersApp.ts`, `src/hooks/useUpdater.ts`, `src/hooks/useGlobalPanel.ts`, and `src/hooks/useDangerousMode.ts`.
+- Outside Tauri, `isWebEnv()` returns false and the UI intentionally renders a "Run inside Tauri" stub. Do not try to make the browser-only path feature-complete.
+- All frontend IPC goes through `src/lib/api.ts`. Do not call `invoke()` directly from components or hardcode command names.
+- Keep `src/lib/types.ts` aligned with `src-tauri/src/models.rs`; the UI never receives provider secrets.
+- `components.json` uses shadcn's `base-nova` style on top of `@base-ui/react`. Use the existing `src/components/ui/` primitives; do not introduce Radix-based replacements.
+- Tailwind is v4 via `@tailwindcss/postcss` in `postcss.config.mjs`. There is no `tailwind.config.js`; theme tokens live in `src/app/globals.css` and `components.json`.
 
-```bash
-pnpm lint                          # ESLint (config: eslint.config.mjs)
-pnpm exec tsc --noEmit             # TypeScript typecheck
-cd src-tauri && cargo test         # Rust unit tests (includes 6 merge.rs tests)
-cd src-tauri && cargo test -- --ignored keyring   # exercises real OS keyring
-```
+## Backend
 
-There is no JS/TS unit-test runner — only Rust tests + lint + typecheck.
+- `src-tauri/src/lib.rs` is the Tauri entrypoint and command registry. It also performs first-launch import from existing Claude settings and subscription credentials.
+- `src-tauri/src/merge.rs` is the single source of truth for provider -> `settings.json.env` mapping. Preserve its provider-authoritative behavior: canonical keys missing from the provider are removed, unknown existing keys are preserved.
+- `src-tauri/src/storage/settings.rs` is the only place that writes Claude Code's `settings.json`. It uses a sidecar lock file, backup copy, temp file, `fsync`, and atomic rename.
+- `src-tauri/src/storage/keyring.rs` stores secrets in the OS keyring under service `claude-config`. Secrets do not belong in `providers.json` or in TS models.
+- `src-tauri/src/models.rs` defines the canonical env-key list and the serde shape shared with the UI. If you change provider fields, update both Rust and TypeScript.
 
-# Frontend architecture (`src/`)
+## Repo-specific gotchas
 
-- `src/app/page.tsx` — single page, 2-pane shell, **owns all app state**. The
-  initial provider/keyring load runs in a `useEffect` with
-  `set-state-in-effect` intentionally disabled (see file header).
-- `src/lib/api.ts` — typed wrappers around `invoke()`. **All component code
-  must go through this** — never call `invoke()` directly, never hardcode
-  command names.
-- `src/lib/types.ts` — TypeScript mirror of the Rust `Provider`/`AppError`
-  types. **Keep in sync with `src-tauri/src/models.rs`.** The auth token is
-  deliberately absent from the `Provider` struct returned to the UI.
-- `src/lib/utils-app.ts` — `maskToken()` shows first 6 + … + last 4. The Rust
-  side never returns the full token; preserve this contract.
-- `isWebEnv()` checks `__TAURI_INTERNALS__` in `window`. Outside Tauri the UI
-  renders a "Run inside Tauri" stub — don't try to make web-only behavior work.
-- `components.json` declares `style: "base-nova"` — this is **base-ui**, not
-  Radix. Don't import Radix primitives; the shadcn components in
-  `src/components/ui/` are already base-ui based.
-- Tailwind v4 via `@tailwindcss/postcss` (see `postcss.config.mjs`). There is
-  **no `tailwind.config.js`** — config lives in `src/app/globals.css` and
-  `components.json`.
-
-# Backend architecture (`src-tauri/`)
-
-- `src/lib.rs` — Tauri builder + first-launch auto-import (captures the
-  existing `settings.json` env as an "Imported" provider).
-- `src/models.rs` — `Provider`, `AppError`, and `CANONICAL_ENV_KEYS` (the
-  exact 9 keys the merge logic knows about). The `len() == 9` test fails if
-  someone edits the list carelessly.
-- `src/merge.rs` — **single source of truth** for what `load_provider` writes
-  to `settings.json.env`. Pure functions, no I/O, exhaustively unit-tested.
-  Provider-authoritative semantics: canonical keys absent from the provider
-  are *removed*, unknown keys in existing settings are *preserved*. Don't
-  reimplement merge logic elsewhere.
-- `src/storage/settings.rs` — atomic write (tempfile + fsync + rename) under
-  `lock_exclusive` across the read-modify-write. **This is the only place
-  `settings.json` is mutated**; the rest of the file (hooks,
-  enabledPlugins, `model`, etc.) is preserved verbatim.
-- `src/storage/keyring.rs` — OS keyring access. Auth tokens are **never**
-  written to disk in plaintext. The UI gates "New provider" on
-  `keyringAvailable` — the backend should also refuse saves when keyring is
-  unavailable.
-
-# Conventions and gotchas
-
-- App identifier is `com.claudeconfig.app` (see `src-tauri/tauri.conf.json`).
-  App-data dir is `<app-data>/com.claudeconfig.app/` (Linux:
-  `~/.local/share/...`).
-- `next.config.ts` uses `output: "export"` and `trailingSlash: true` — this
-  is a static SPA loaded by Tauri. No SSR, no API routes, no `getServerSideProps`.
-- `next-env.d.ts` is **gitignored and regenerated** by Next.js — don't edit
-  it. ESLint already skips it.
-- ESLint extends `eslint-config-next` and **adds `src-tauri/target/` to
-  ignores** — Tauri generates JS into that path during builds.
-- Not a pnpm workspace. `ignoredBuiltDependencies` (`sharp`, `unrs-resolver`)
-  lives in `package.json` under the `pnpm` key.
-- Honored env: `CLAUDE_CONFIG_DIR` (custom Claude Code config path) and
-  `TAURI_DEV_HOST` (mobile dev). See `next.config.ts`.
-- Arch Linux has no native `.pkg.tar` target — README explains the
-  AppImage/AUR workaround.
-
-# Storage layout (recap)
-
-| What | Where |
-|---|---|
-| Saved provider metadata | `<app-data>/providers.json` |
-| Auth tokens | OS keyring, service `claude-config` |
-| settings.json backups | `<app-data>/backups/<unix-ms>.json` |
-| `~/.claude/settings.json` | Claude Code's own file — only its `env` block is touched |
+- App identifier is `com.claudeconfig.app`; app data lives under that directory name.
+- `CLAUDE_CONFIG_DIR` overrides the Claude Code config dir. `TAURI_DEV_HOST` changes the Next asset prefix for Tauri dev.
+- `next-env.d.ts`, `.next/`, `out/`, and `src-tauri/target/` are generated artifacts; do not hand-edit them.
+- ESLint ignores `.next/**`, `out/**`, `src-tauri/target/**`, and `.worktrees/**`.
+- This is a single-package repo. There is no `pnpm-workspace.yaml`; the pnpm-specific `ignoredBuiltDependencies` setting lives in `package.json`.
