@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Folder,
   History,
   Loader2,
@@ -59,28 +59,35 @@ export function SessionsSidebarButton({
   );
 }
 
-const PAGE_SIZE = 20;
+/**
+ * Group key for sessions that didn't resolve to a project (orphan
+ * jsonl files outside any Claude project dir). Falls out as a single
+ * "(unindexed)" bucket at the bottom of the list.
+ */
+const UNGROUPED_KEY = "__ungrouped__";
 
 /**
- * Main-space Sessions view. Paginates the full list returned by the
- * backend (capped at 1000 rows on the Rust side). Clicking a row
- * swaps the list for a read-only transcript view (`SessionDetail`);
- * the back button in the detail view returns here.
+ * Main-space Sessions view. Groups sessions by project path into
+ * collapsible accordions, so one project with many conversations
+ * doesn't drown the rest. Server still caps at 1000 rows on the
+ * Rust side.
  *
- * ponytail: server-side sorted + capped, client paginates. Add search
- * when the page count crosses ~20.
+ * ponytail: server-side sorted + capped, grouping handles what
+ * pagination handled before. Per-group pagination when a single
+ * project has hundreds of sessions — re-add if it shows up.
  */
 export function SessionsView({ onClose }: GlobalTabProps) {
   const { sessions, loading, refresh } = useSessions();
-  const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<SessionSummary | null>(null);
 
-  // Reset to page 1 if a refresh shrinks the total below the current page.
   const initialLoad = sessions.length === 0 && loading;
-  const totalPages = Math.max(1, Math.ceil(sessions.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages - 1);
-  const pageStart = safePage * PAGE_SIZE;
-  const pageRows = sessions.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // Group by project_path; sort groups by most-recent activity so the
+  // "where am I working today" project lands at the top.
+  const groups = useMemo(
+    () => groupByProject(sessions),
+    [sessions],
+  );
 
   if (selected) {
     return (
@@ -125,46 +132,235 @@ export function SessionsView({ onClose }: GlobalTabProps) {
         </Button>
       </div>
 
-      <div className="rounded-lg border bg-card/40">
-        {initialLoad ? (
-          <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-            Loading sessions…
+      {initialLoad ? (
+        <div className="rounded-lg border bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground">
+          Loading sessions…
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border bg-card/40 px-4 py-10 text-center">
+          <MessageSquare className="size-5 text-muted-foreground/60" />
+          <p className="text-sm font-medium">No Claude Code sessions found</p>
+          <p className="max-w-sm text-[11px] text-muted-foreground">
+            Run a conversation with Claude Code and it will appear here.
           </p>
-        ) : sessions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-            <MessageSquare className="size-5 text-muted-foreground/60" />
-            <p className="text-sm font-medium">No Claude Code sessions found</p>
-            <p className="max-w-sm text-[11px] text-muted-foreground">
-              Run a conversation with Claude Code and it will appear here.
-            </p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border/60">
-            {pageRows.map((s) => (
-              <SessionRow
-                key={s.session_id}
-                session={s}
-                onSelect={setSelected}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {sessions.length > PAGE_SIZE && (
-        <Pagination
-          page={safePage}
-          totalPages={totalPages}
-          onChange={setPage}
-        />
+        </div>
+      ) : (
+        <ProjectAccordion groups={groups} onSelect={setSelected} />
       )}
 
       {!initialLoad && sessions.length > 0 && (
         <p className="text-center text-[10px] text-muted-foreground">
-          {sessions.length} session{sessions.length === 1 ? "" : "s"} total
+          {sessions.length} session{sessions.length === 1 ? "" : "s"} across{" "}
+          {groups.length} project{groups.length === 1 ? "" : "s"}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * One accordion slice — a project header with `FolderOpen`/`FolderClosed`
+ * affordance and a per-row transcript below it. Tracks its own
+ * expanded state; the top-level group expands by default so the
+ * first project lands visible.
+ */
+function ProjectAccordion({
+  groups,
+  onSelect,
+}: {
+  groups: ProjectGroup[];
+  onSelect: (s: SessionSummary) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(groups[0] ? [groups[0].key] : []),
+  );
+
+  // Keep stale keys from accumulating when a refresh removes a project.
+  // Bounded to one follow-up render after `groups` change; the
+  // identity-return short-circuit keeps it a no-op on unrelated rerenders.
+  const validKeys = useMemo(() => new Set(groups.map((g) => g.key)), [groups]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpanded((prev) => {
+      let hasStale = false;
+      for (const k of prev) {
+        if (!validKeys.has(k)) {
+          hasStale = true;
+          break;
+        }
+      }
+      if (!hasStale) return prev;
+      const next = new Set<string>();
+      for (const k of prev) if (validKeys.has(k)) next.add(k);
+      return next;
+    });
+  }, [validKeys]);
+
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {groups.map((group) => (
+        <SessionGroup
+          key={group.key}
+          group={group}
+          open={expanded.has(group.key)}
+          onToggle={() => toggle(group.key)}
+          onSelect={onSelect}
+        />
+      ))}
+    </div>
+  );
+}
+
+interface ProjectGroup {
+  key: string;
+  /** Decoded path like "/home/ayande/Project/claude-config" or the
+   * ungrouped label when no project resolved. */
+  label: string;
+  /** Sort key; ISO timestamp or "" for never-modified. */
+  latestModified: string;
+  sessions: SessionSummary[];
+}
+
+/**
+ * Bucket sessions by their full project_path. Sessions whose
+ * `project_path` is null (orphan jsonls) collapse into one synthetic
+ * "Unindexed" group, sorted last.
+ */
+function groupByProject(sessions: SessionSummary[]): ProjectGroup[] {
+  const buckets = new Map<string, SessionSummary[]>();
+  for (const s of sessions) {
+    const key = s.project_path ?? UNGROUPED_KEY;
+    const list = buckets.get(key);
+    if (list) list.push(s);
+    else buckets.set(key, [s]);
+  }
+
+  const groups: ProjectGroup[] = [];
+  for (const [key, list] of buckets) {
+    groups.push({
+      key,
+      label: key === UNGROUPED_KEY ? "(unindexed)" : key,
+      latestModified: list.reduce<string>(
+        (acc, s) => (s.modified && s.modified > acc ? s.modified : acc),
+        "",
+      ),
+      sessions: list,
+    });
+  }
+
+  // Project groups: most recently active first. Unindexed always
+  // dead-last so it doesn't compete for attention.
+  groups.sort((a, b) => {
+    if (a.key === UNGROUPED_KEY) return 1;
+    if (b.key === UNGROUPED_KEY) return -1;
+    return b.latestModified.localeCompare(a.latestModified);
+  });
+
+  return groups;
+}
+
+function SessionGroup({
+  group,
+  open,
+  onToggle,
+  onSelect,
+}: {
+  group: ProjectGroup;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (s: SessionSummary) => void;
+}) {
+  const segments = useMemo(
+    () => splitBreadcrumbs(group.label),
+    [group.label],
+  );
+  const isUngrouped = group.label === "(unindexed)";
+
+  return (
+    <section className="rounded-lg border bg-card/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors cursor-pointer",
+          "hover:bg-muted/40",
+        )}
+      >
+        {open ? (
+          <ChevronUp className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <Folder
+          className={cn(
+            "size-3.5 shrink-0",
+            open ? "text-primary" : "text-muted-foreground/70",
+          )}
+        />
+        <div className="min-w-0 flex-1 truncate text-xs">
+          {isUngrouped ? (
+            <span className="font-medium text-muted-foreground">
+              {group.label}
+            </span>
+          ) : (
+            <BreadcrumbPath segments={segments} />
+          )}
+        </div>
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          {group.sessions.length}
+        </span>
+      </button>
+      {open && (
+        <ul className="divide-y divide-border/60 border-t border-border/40">
+          {group.sessions.map((s) => (
+            <SessionRow
+              key={s.session_id}
+              session={s}
+              onSelect={onSelect}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Split "/home/ayande/Project/claude-config" into its path segments,
+ * dropping the leading empty piece from the leading slash. */
+function splitBreadcrumbs(path: string): string[] {
+  return path.split("/").filter(Boolean);
+}
+
+function BreadcrumbPath({ segments }: { segments: string[] }) {
+  return (
+    <span className="font-mono text-[11px]">
+      {segments.map((seg, i) => (
+        <span key={`${i}-${seg}`}>
+          {i > 0 && (
+            <span className="text-muted-foreground/50">/</span>
+          )}
+          <span
+            className={cn(
+              i === segments.length - 1
+                ? "font-medium text-foreground"
+                : "text-muted-foreground/80",
+            )}
+          >
+            {seg}
+          </span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -412,44 +608,8 @@ function MessageView({ message }: { message: SessionMessage }) {
 }
 
 // ---------------------------------------------------------------------------
-// Existing list-view helpers
+// List-view helpers
 // ---------------------------------------------------------------------------
-
-interface PaginationProps {
-  page: number;
-  totalPages: number;
-  onChange: (page: number) => void;
-}
-
-function Pagination({ page, totalPages, onChange }: PaginationProps) {
-  return (
-    <div className="flex items-center justify-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={page === 0}
-        onClick={() => onChange(page - 1)}
-        className="cursor-pointer"
-      >
-        <ChevronLeft className="size-3.5" />
-        Prev
-      </Button>
-      <span className="text-[11px] text-muted-foreground tabular-nums">
-        Page {page + 1} of {totalPages}
-      </span>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={page >= totalPages - 1}
-        onClick={() => onChange(page + 1)}
-        className="cursor-pointer"
-      >
-        Next
-        <ChevronRight className="size-3.5" />
-      </Button>
-    </div>
-  );
-}
 
 /**
  * Compact relative-time label ("just now", "5m ago", "3d ago"). Avoids

@@ -74,6 +74,14 @@ pub struct SessionSummary {
     /// Last path segment of `project_path`, e.g. "claude-config" — used
     /// as the row footer.
     pub project_name: Option<String>,
+    /// Full decoded project path, e.g. "/home/ayande/Project/claude-config".
+    /// `None` for jsonl-stat fallbacks where the on-disk slug wasn't
+    /// recognized as a Claude project dir. Drives the accordion grouping.
+    ///
+    /// ponytail: ambiguous on directory names with literal `-`, mirrors
+    /// Claude Code's own folder-naming scheme. Grouping can collide in
+    /// that edge case — acceptable for the v1 sidebar view.
+    pub project_path: Option<String>,
     /// Absolute path to the `.jsonl` transcript. Drives tooltips + a
     /// future "Reveal in file manager" action.
     pub full_path: String,
@@ -188,6 +196,7 @@ fn merge_index_into(
                 .project_path
                 .as_deref()
                 .and_then(last_path_segment),
+            project_path: entry.project_path,
             full_path: entry.full_path,
         });
     }
@@ -206,19 +215,29 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
         .flatten()
         .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
 
+    let project_folder_slug = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string());
+    let project_path = project_folder_slug.as_deref().map(decode_project_slug);
     let session_id = file_stem(path);
     Some(SessionSummary {
         title: format!("(unindexed) {}", session_id),
         session_id,
         message_count: 0,
         modified,
-        project_name: path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string()),
+        project_name: project_folder_slug,
+        project_path,
         full_path: path.display().to_string(),
     })
+}
+
+/// Claude Code encodes project paths as on-disk folder names with every
+/// `/` replaced by `-` (`/home/ayande/Project/claude-config` →
+/// `-home-ayande-Project-claude-config`). Reverses that for display.
+fn decode_project_slug(slug: &str) -> String {
+    slug.replace('-', "/")
 }
 
 fn collect_jsonl_files(dir: &Path) -> Vec<PathBuf> {

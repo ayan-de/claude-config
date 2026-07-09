@@ -337,6 +337,9 @@ export interface SessionSummary {
   modified: string | null;
   /** Last path segment of project_path (e.g. "claude-config"). */
   project_name: string | null;
+  /** Full decoded project path, e.g. "/home/ayande/Project/claude-config".
+   * Drives the accordion grouping in `Sessions.tsx`. */
+  project_path: string | null;
   /** Absolute path to the `.jsonl` transcript. */
   full_path: string;
 }
