@@ -75,12 +75,10 @@ pub struct SessionSummary {
     /// as the row footer.
     pub project_name: Option<String>,
     /// Full decoded project path, e.g. "/home/ayande/Project/claude-config".
-    /// `None` for jsonl-stat fallbacks where the on-disk slug wasn't
-    /// recognized as a Claude project dir. Drives the accordion grouping.
-    ///
-    /// ponytail: ambiguous on directory names with literal `-`, mirrors
-    /// Claude Code's own folder-naming scheme. Grouping can collide in
-    /// that edge case — acceptable for the v1 sidebar view.
+    /// Sourced from the transcript's own `cwd` field for unindexed rows
+    /// (authoritative), or from the index entry directly. Drives the
+    /// accordion grouping. `None` only when both sources fail (empty
+    /// transcript + relative slug).
     pub project_path: Option<String>,
     /// Absolute path to the `.jsonl` transcript. Drives tooltips + a
     /// future "Reveal in file manager" action.
@@ -202,9 +200,11 @@ fn merge_index_into(
     }
 }
 
-/// Stat-only summary for a jsonl transcript not yet in the index. We
-/// avoid parsing the file — modified time + filename is enough for a
-/// placeholder row.
+/// Stat-only-ish summary for a jsonl transcript not yet in the index.
+/// We do read a few lines to recover the authoritative `cwd` — the
+/// folder-slug decoding is ambiguous when a directory name contains `-`
+/// (see [`decode_project_slug`]), and the transcript itself carries the
+/// unambiguous answer.
 fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
     let metadata = fs::metadata(path).ok()?;
     let modified = metadata
@@ -220,7 +220,12 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .map(|s| s.to_string());
-    let project_path = project_folder_slug.as_deref().map(decode_project_slug);
+    // Prefer the `cwd` written into the transcript itself — it's the
+    // ground truth. Fall back to filesystem-aware slug decoding when
+    // the transcript has no usable `cwd` (empty file, corrupt lines,
+    // or an old Claude Code version).
+    let project_path = read_cwd_from_transcript(path)
+        .or_else(|| project_folder_slug.as_deref().and_then(decode_project_slug));
     let session_id = file_stem(path);
     Some(SessionSummary {
         title: format!("(unindexed) {}", session_id),
@@ -233,11 +238,71 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
     })
 }
 
+/// Extract the authoritative project working directory from a Claude Code
+/// transcript. Every user/assistant record carries a `cwd` field, so we
+/// only need to scan a handful of leading lines. Bounded by
+/// `CWD_SCAN_LINES` to keep this cheap even on transcripts that lead
+/// with meta records (`summary`, `file-history-snapshot`, …) before the
+/// first real turn.
+const CWD_SCAN_LINES: usize = 32;
+
+fn read_cwd_from_transcript(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().take(CWD_SCAN_LINES) {
+        let Ok(line) = line else { continue };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let value: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(cwd) = value.get("cwd").and_then(Value::as_str) {
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Claude Code encodes project paths as on-disk folder names with every
-/// `/` replaced by `-` (`/home/ayande/Project/claude-config` →
-/// `-home-ayande-Project-claude-config`). Reverses that for display.
-fn decode_project_slug(slug: &str) -> String {
-    slug.replace('-', "/")
+/// `/` replaced by `-`. The mapping is lossy when folder names themselves
+/// contain `-` (`/home/ayan-de/Projects/x` →
+/// `-home-ayan-de-Projects-x`), so we resolve the ambiguity by walking
+/// the filesystem from `/` and treating a `-` as a separator only when
+/// the accumulated prefix is a real directory. Prefer
+/// [`read_cwd_from_transcript`] when the transcript is available — this
+/// is only a display-only fallback for empty/corrupt transcripts.
+///
+/// Returns `None` when the slug does not start with `-` (i.e. was a
+/// relative path).
+fn decode_project_slug(slug: &str) -> Option<String> {
+    let rest = slug.strip_prefix('-')?;
+    let mut path = PathBuf::from("/");
+    let mut current = String::new();
+
+    for ch in rest.chars() {
+        if ch == '-' {
+            let candidate = path.join(&current);
+            if candidate.is_dir() {
+                path = candidate;
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        path.push(&current);
+    }
+
+    Some(path.to_string_lossy().into_owned())
 }
 
 fn collect_jsonl_files(dir: &Path) -> Vec<PathBuf> {
@@ -643,6 +708,53 @@ mod tests {
         assert_eq!(out[0].session_id, "orphan");
         assert!(out[0].title.contains("unindexed"));
         assert!(out[0].modified.is_some());
+    }
+
+    #[test]
+    fn unindexed_session_recovers_cwd_from_transcript() {
+        // Ground truth is written into every user/assistant record, so
+        // the slug-decoding ambiguity around `-` in folder names doesn't
+        // reach the UI when the transcript is readable.
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp
+            .path()
+            .join("projects/-home-ayan-de-Projects-githubProjects-jcode");
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(
+            proj.join("s.jsonl"),
+            concat!(
+                "{\"type\":\"user\",\"cwd\":\"/home/ayan-de/Projects/githubProjects/jcode\",",
+                "\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+            ),
+        )
+        .unwrap();
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].project_path.as_deref(),
+            Some("/home/ayan-de/Projects/githubProjects/jcode"),
+        );
+    }
+
+    #[test]
+    fn unindexed_session_scans_past_meta_records_for_cwd() {
+        // Meta records (summary / file-history-snapshot) can appear
+        // before the first user turn — cwd is on the user record.
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects/-home-ayan-de-x");
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(
+            proj.join("s.jsonl"),
+            concat!(
+                "{\"type\":\"summary\",\"summary\":\"a\"}\n",
+                "{\"type\":\"file-history-snapshot\"}\n",
+                "{\"type\":\"user\",\"cwd\":\"/home/ayan-de/x\",",
+                "\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+            ),
+        )
+        .unwrap();
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out[0].project_path.as_deref(), Some("/home/ayan-de/x"));
     }
 
     #[test]
