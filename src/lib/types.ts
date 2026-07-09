@@ -319,3 +319,24 @@ export interface TrackerConfigView {
   updated_at: string;
   has_secret: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Sessions (Claude Code conversation history on this PC)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row in the sidebar Sessions list. Mirrors `SessionSummary` in
+ * `src-tauri/src/storage/sessions.rs`.
+ */
+export interface SessionSummary {
+  session_id: string;
+  /** Summary or first prompt, truncated server-side. */
+  title: string;
+  message_count: number;
+  /** RFC 3339 timestamp of last activity; drives the "5m ago" label. */
+  modified: string | null;
+  /** Last path segment of project_path (e.g. "claude-config"). */
+  project_name: string | null;
+  /** Absolute path to the `.jsonl` transcript. */
+  full_path: string;
+}

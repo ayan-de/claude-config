@@ -8,8 +8,8 @@ use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
 use crate::storage::{
-    discover_claude_dir, scan_marketplaces, scan_mcp_servers, scan_skills, MarketplaceSummary,
-    McpServerSummary, SkillSummary,
+    discover_claude_dir, scan_marketplaces, scan_mcp_servers, scan_sessions, scan_skills,
+    MarketplaceSummary, McpServerSummary, SessionSummary, SkillSummary,
 };
 
 /// Returns the path Claude Code reads `settings.json` from. Respects the
@@ -106,4 +106,13 @@ pub fn list_skills_cmd() -> AppResult<Vec<SkillSummary>> {
 #[tauri::command]
 pub fn list_mcp_servers_cmd() -> AppResult<Vec<McpServerSummary>> {
     scan_mcp_servers()
+}
+
+/// Lists Claude Code conversation sessions on this PC. Reads
+/// `<claude_dir>/projects/*/sessions-index.json` (plus a jsonl fallback
+/// for transcripts the index has not yet recorded). Honors
+/// `CLAUDE_CONFIG_DIR`. Newest activity first, sidechain entries skipped.
+#[tauri::command]
+pub fn list_sessions_cmd() -> AppResult<Vec<SessionSummary>> {
+    scan_sessions(&discover_claude_dir())
 }

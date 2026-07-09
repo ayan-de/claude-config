@@ -3,6 +3,7 @@
 import {
   BarChart3,
   FileText,
+  History,
   PlugZap,
   Sparkles,
   Store,
@@ -22,6 +23,7 @@ import {
   McpSidebarButton,
   McpView,
 } from "@/components/Mcp";
+import { SessionsSidebarButton, SessionsView } from "@/components/Sessions";
 import {
   SkillsSidebarButton,
   SkillsView,
@@ -50,8 +52,19 @@ export interface GlobalTab {
   icon: LucideIcon;
   /** Hover text shown in the workspace info icon — explains what this tab is for. */
   tooltip: string;
-  /** Sidebar entry. Each tab implements its own because existence indicators vary. */
+  /**
+   * Sidebar entry. Each tab implements its own because existence
+   * indicators vary. Required by the type but the Sidebar loop skips
+   * tabs whose `hideInSidebar` is true, in which case the trigger is
+   * mounted elsewhere (typically the TitleBar).
+   */
   SidebarButton: ComponentType<SidebarTabButtonProps>;
+  /**
+   * When true, the Sidebar's Global Config section will not render
+   * this tab's button. Use this when the trigger lives elsewhere
+   * (e.g. TitleBar) but the tab still owns a main-pane view.
+   */
+  hideInSidebar?: boolean;
   /** Main-pane view rendered when this tab is the active one. */
   Component: ComponentType<GlobalTabProps>;
 }
@@ -96,6 +109,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Browse MCP servers Claude Code connects to — globally configured in ~/.claude.json.",
     SidebarButton: McpSidebarButton,
     Component: McpView,
+  },
+  {
+    id: "sessions",
+    label: "Sessions",
+    icon: History,
+    tooltip:
+      "Claude Code conversation sessions stored on this PC. Click a row to reveal the transcript in your file manager.",
+    SidebarButton: SessionsSidebarButton,
+    Component: SessionsView,
   },
   {
     id: "usage",

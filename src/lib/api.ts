@@ -8,6 +8,7 @@ import type {
   McpServerSummary,
   Provider,
   ProviderInput,
+  SessionSummary,
   SkillSummary,
   TrackerConfigView,
   TrackerSourceDescriptor,
@@ -75,6 +76,15 @@ export const listSkills = () => call<SkillSummary[]>("list_skills_cmd");
  */
 export const listMcpServers = () =>
   call<McpServerSummary[]>("list_mcp_servers_cmd");
+
+/**
+ * Lists Claude Code conversation sessions on this PC. Scans the
+ * per-project sessions index files under &lt;claude_dir&gt;/projects
+ * plus a jsonl fallback for transcripts not yet indexed. Mirrors
+ * `scan_sessions` in `src-tauri/src/storage/sessions.rs`. Returns an
+ * empty array when no sessions exist yet.
+ */
+export const listSessions = () => call<SessionSummary[]>("list_sessions_cmd");
 
 // ---------- providers ----------
 

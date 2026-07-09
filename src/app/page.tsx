@@ -1,5 +1,7 @@
 "use client";
 
+import { History } from "lucide-react";
+
 import { isWebEnv } from "@/lib/utils-app";
 import { useProvidersApp } from "@/hooks/useProvidersApp";
 import { useDangerousMode } from "@/hooks/useDangerousMode";
@@ -14,6 +16,7 @@ import { DangerousModeConfirm } from "@/components/DangerousModeConfirm";
 
 import { GLOBAL_TABS } from "@/data/globalTabs";
 import { version as appVersion } from "../../package.json";
+import { cn } from "@/lib/utils";
 
 export default function Page() {
   const providers = useProvidersApp();
@@ -84,6 +87,29 @@ export default function Page() {
         }
         actions={
           <div className="flex items-center gap-2 pr-2">
+            <button
+              type="button"
+              onClick={() =>
+                panel.activeTabId === "sessions"
+                  ? panel.close()
+                  : panel.openTab("sessions")
+              }
+              title={
+                panel.activeTabId === "sessions"
+                  ? "Close Sessions"
+                  : "Open Sessions"
+              }
+              aria-label="Sessions"
+              aria-pressed={panel.activeTabId === "sessions"}
+              className={cn(
+                "tauri-no-drag flex size-7 items-center justify-center rounded-md transition shrink-0 cursor-pointer",
+                panel.activeTabId === "sessions"
+                  ? "bg-primary/15 text-primary"
+                  : "text-foreground/70 hover:bg-foreground/10 hover:text-foreground",
+              )}
+            >
+              <History className="size-3.5" />
+            </button>
             {updater.available && updater.version ? (
               <button
                 type="button"

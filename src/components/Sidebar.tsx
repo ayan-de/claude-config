@@ -183,7 +183,7 @@ export function Sidebar({
           "Manage global config files shared across all providers.",
         content: (
           <div className="flex flex-col gap-1.5">
-            {GLOBAL_TABS.map((tab) => (
+            {GLOBAL_TABS.filter((t) => !t.hideInSidebar).map((tab) => (
               <tab.SidebarButton
                 key={tab.id}
                 active={activeTabId === tab.id}

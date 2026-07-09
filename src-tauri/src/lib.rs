@@ -72,6 +72,7 @@ pub fn run() {
             commands::system::list_marketplaces_cmd,
             commands::system::list_skills_cmd,
             commands::system::list_mcp_servers_cmd,
+            commands::system::list_sessions_cmd,
             commands::providers::list_providers_cmd,
             commands::providers::get_provider_cmd,
             commands::providers::add_provider_cmd,

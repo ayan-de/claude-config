@@ -3,9 +3,10 @@ pub mod credentials;
 pub mod keyring;
 pub mod marketplaces;
 pub mod mcp;
-pub mod providers;
-pub mod settings;
 pub mod permissions;
+pub mod providers;
+pub mod sessions;
+pub mod settings;
 pub mod skills;
 pub mod tracker;
 
@@ -14,6 +15,7 @@ pub use credentials::{credentials_path, read_credentials_oauth, write_credential
 pub use keyring::{KeyringStatus, KeyringStore};
 pub use marketplaces::{scan_marketplaces, MarketplaceSummary};
 pub use mcp::{scan_mcp_servers, McpServerSummary};
+pub use sessions::{scan_sessions, SessionSummary};
 pub use skills::{scan_skills, SkillSummary};
 pub use providers::{load_providers_file, save_providers_file};
 pub use settings::{discover_claude_dir, read_settings, settings_path, write_settings_atomic};
