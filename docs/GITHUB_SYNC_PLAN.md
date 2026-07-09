@@ -79,6 +79,27 @@ pub struct ProjectPathMappings {
     pub mappings: HashMap<String, String>,  // original → local
 }
 
+// Stored in ~/.claude/projects/<project-slug>/session_sync_state.json
+pub struct SessionSyncState {
+    pub version: u32,
+    pub sessions: HashMap<String, SessionSyncMetadata>,  // session_id → metadata
+}
+
+pub struct SessionSyncMetadata {
+    pub last_uploaded: Option<String>,        // RFC3339 timestamp
+    pub remote_sha: Option<String>,            // GitHub blob SHA for conflict detection
+    pub last_local_modified: Option<String>,   // File mtime at upload time
+    pub sync_state: SyncState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    NeverUploaded,
+    Synced,
+    OutOfSync,     // Local changes after last upload
+}
+
 pub struct GitHubDeviceFlowStart {
     pub device_code: String,
     pub user_code: String,
@@ -115,6 +136,8 @@ All in new `src-tauri/src/commands/github_sync.rs`:
 7. `github_download_session_cmd(session_id, project_slug, target_project_path) -> AppResult<String>`
 8. `github_get_path_mappings_cmd() -> AppResult<Vec<ProjectPathMapping>>`
 9. `github_set_path_mapping_cmd(original_path, local_path) -> AppResult<()>`
+10. `github_get_session_sync_state_cmd(project_path: String) -> AppResult<SessionSyncState>`
+11. `github_check_session_sync_status_cmd(session_id: String, full_path: String) -> AppResult<SyncState>`
 
 ## GitHub API Integration
 
@@ -213,8 +236,54 @@ All in new `src-tauri/src/commands/github_sync.rs`:
 **src/components/Sessions.tsx:**
 - Wire GitHub icon click handler in `SessionRow` (lines 418-425)
 - Call `github_upload_session_cmd()` with session metadata
-- Show upload state: spinner while uploading, checkmark on success
+- Show upload state with dynamic icon colors:
+  - **Gray (muted)**: `NeverUploaded` - clickable, tooltip "Upload to GitHub"
+  - **Green (primary)**: `Synced` - clickable, tooltip "Last uploaded: {time}"
+  - **Yellow (warning)**: `OutOfSync` - clickable, tooltip "Local changes detected. Click to update."
+  - **Spinner**: `Uploading` - not clickable, tooltip "Uploading..."
+- Below session metadata row, add small text showing sync timestamps when applicable:
+  - "Uploaded {relative_time} · Modified {relative_time}" when `OutOfSync`
+  - "Uploaded {relative_time}" when `Synced`
 - Add "GitHub" button in `SessionsView` header (opens RemoteSessionsModal, visible only when connected)
+
+## Sync State Workflow
+
+### On Session Upload
+1. Read current file mtime: `fs::metadata(full_path)?.modified()?`
+2. Upload session to GitHub via Git Data API
+3. Store in `session_sync_state.json`:
+   - `last_uploaded`: current timestamp (RFC3339)
+   - `remote_sha`: GitHub blob SHA from upload response
+   - `last_local_modified`: file mtime at upload time
+   - `sync_state`: `Synced`
+4. Return success to frontend → icon turns green
+
+### On Session List Load
+For each session in the list:
+1. Check if `session_sync_state.json` exists for this project
+2. If sync metadata exists for this session_id:
+   - Read current file mtime
+   - Compare with stored `last_local_modified`
+   - If mtimes differ: set `sync_state` to `OutOfSync` → icon turns yellow
+   - If mtimes match: keep `sync_state` as `Synced` → icon stays green
+3. If no sync metadata: `sync_state` is `NeverUploaded` → icon gray
+
+### On Upload Click (Out of Sync)
+1. User clicks yellow icon (session has local changes after previous upload)
+2. Show confirmation: "This session has local changes. Update remote copy?"
+3. On confirm: re-upload (same flow as initial upload)
+4. Update `session_sync_state.json` with new timestamps and SHA
+5. Icon turns green again
+
+### On Download
+1. Download session from GitHub
+2. Write to local filesystem
+3. Create sync metadata entry:
+   - `last_uploaded`: remote file's last commit timestamp
+   - `remote_sha`: GitHub blob SHA
+   - `last_local_modified`: file mtime after write
+   - `sync_state`: `Synced`
+4. Icon immediately shows green in sessions list
 
 **src/components/SettingsMenu.tsx:**
 - Add "GitHub Sync" menu item (opens GitHubSyncPanel)
