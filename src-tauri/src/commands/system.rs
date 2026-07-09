@@ -8,8 +8,9 @@ use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
 use crate::storage::{
-    discover_claude_dir, scan_marketplaces, scan_mcp_servers, scan_sessions, scan_skills,
-    MarketplaceSummary, McpServerSummary, SessionSummary, SkillSummary,
+    discover_claude_dir, parse_session_transcript, scan_marketplaces, scan_mcp_servers,
+    scan_sessions, scan_skills, MarketplaceSummary, McpServerSummary, SessionMessage,
+    SessionSummary, SkillSummary,
 };
 
 /// Returns the path Claude Code reads `settings.json` from. Respects the
@@ -115,4 +116,13 @@ pub fn list_mcp_servers_cmd() -> AppResult<Vec<McpServerSummary>> {
 #[tauri::command]
 pub fn list_sessions_cmd() -> AppResult<Vec<SessionSummary>> {
     scan_sessions(&discover_claude_dir())
+}
+
+/// Parses a Claude Code `.jsonl` transcript at `path` into a flat list
+/// of messages for the in-app viewer. Honors `path` only — the caller
+/// passes the absolute path it received from `list_sessions_cmd`. Errors
+/// only if the file is unreadable; malformed lines are silently skipped.
+#[tauri::command]
+pub fn parse_session_cmd(path: PathBuf) -> AppResult<Vec<SessionMessage>> {
+    parse_session_transcript(&path)
 }

@@ -7,9 +7,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { listSessions } from "@/lib/api";
+import { listSessions, parseSession } from "@/lib/api";
 import { isWebEnv } from "@/lib/utils-app";
-import type { SessionSummary } from "@/lib/types";
+import type { SessionMessage, SessionSummary } from "@/lib/types";
 
 /**
  * Loads Claude Code conversation sessions stored on this PC.
@@ -44,4 +44,44 @@ export function useSessions() {
   }, [refresh]);
 
   return { sessions, loading, refresh };
+}
+
+/**
+ * Loads a single session's parsed transcript on demand. Re-fetches
+ * whenever `path` changes (e.g. user picks a different row).
+ *
+ * Returns `{ messages: null, loading: true }` until the first fetch
+ * resolves; the detail view renders a spinner in that state.
+ */
+export function useSessionTranscript(path: string | null) {
+  const [messages, setMessages] = useState<SessionMessage[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!path) {
+      setMessages(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    parseSession(path)
+      .then((m) => {
+        if (cancelled) return;
+        setMessages(m);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  return { messages, loading, error };
 }

@@ -13,10 +13,12 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::models::{AppError, AppResult};
 
@@ -269,6 +271,240 @@ fn file_stem(path: &Path) -> String {
         .to_string()
 }
 
+/// One message in a parsed session transcript. Mirrors jcode's
+/// `PreviewMessage` shape (see `crates/jcode-tui-session-picker/src/lib.rs:159`)
+/// but flattened — the React renderer decides how to style each role.
+///
+/// ponytail: text-only payload, no markdown flag, no tool_use input JSON.
+/// Renderer can show `tool_name` as a header and `is_tool_result` as a
+/// dim box. Add structured blocks (thinking / tool_use / tool_result)
+/// when the renderer needs to differentiate them.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMessage {
+    pub role: String,
+    pub content: String,
+    pub timestamp: Option<String>,
+    pub tool_name: Option<String>,
+    pub is_tool_result: bool,
+}
+
+/// Cap messages per transcript. Long sessions (1k+ turns) still fit;
+/// this just protects the IPC payload from absurd outliers.
+const MAX_TRANSCRIPT_MESSAGES: usize = 5000;
+
+/// Reads an entire Claude Code `.jsonl` transcript and returns a flat
+/// list of messages. Unlike the picker-style tail-read, this reads the
+/// full file — the viewer is the natural place to show everything.
+///
+/// Lines that fail to parse are silently skipped (jcode's `loading.rs:1894`
+/// pattern: never abort the preview on one malformed record).
+pub fn parse_session_transcript(path: &Path) -> AppResult<Vec<SessionMessage>> {
+    let file = fs::File::open(path).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("opening transcript {}: {e}", path.display()),
+        ))
+    })?;
+    let reader = BufReader::new(file);
+
+    let mut out: Vec<SessionMessage> = Vec::new();
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let value: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let entry_type = value.get("type").and_then(Value::as_str).unwrap_or("");
+        // Drop system / summary / file-history-snapshot / queue-operation
+        // entries — jcode keeps only user + assistant.
+        if entry_type != "user" && entry_type != "assistant" {
+            continue;
+        }
+        let Some(message) = value.get("message") else {
+            continue;
+        };
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or(entry_type)
+            .to_string();
+        let timestamp = value
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        // Iterate content blocks once, emitting one row per block that
+        // carries text. tool_use blocks → row with tool_name set and
+        // content from the input's `description`/`command`/`file_path`
+        // when present. tool_result blocks → row with is_tool_result=true.
+        if let Some(content) = message.get("content") {
+            if content.is_string() {
+                if let Some(text) = content.as_str() {
+                    push_message(
+                        &mut out,
+                        role.clone(),
+                        text.to_string(),
+                        timestamp.clone(),
+                        None,
+                        false,
+                    );
+                }
+            } else if let Some(arr) = content.as_array() {
+                for block in arr {
+                    let kind = block.get("type").and_then(Value::as_str).unwrap_or("");
+                    match kind {
+                        "text" | "input_text" | "output_text" => {
+                            if let Some(text) = block.get("text").and_then(Value::as_str) {
+                                push_message(
+                                    &mut out,
+                                    role.clone(),
+                                    text.to_string(),
+                                    timestamp.clone(),
+                                    None,
+                                    false,
+                                );
+                            }
+                        }
+                        "thinking" => {
+                            if let Some(text) =
+                                block.get("thinking").and_then(Value::as_str)
+                            {
+                                // ponytail: thinking is folded into the
+                                // assistant prose with a leading marker so
+                                // the renderer can dim it; add a separate
+                                // `kind` discriminator when a real viewer
+                                // needs to collapse it.
+                                push_message(
+                                    &mut out,
+                                    role.clone(),
+                                    format!("[thinking] {text}"),
+                                    timestamp.clone(),
+                                    None,
+                                    false,
+                                );
+                            }
+                        }
+                        "tool_use" => {
+                            let name = block
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("tool")
+                                .to_string();
+                            let summary = summarize_tool_input(
+                                block.get("input").unwrap_or(&Value::Null),
+                            );
+                            push_message(
+                                &mut out,
+                                "tool".to_string(),
+                                summary,
+                                timestamp.clone(),
+                                Some(name),
+                                false,
+                            );
+                        }
+                        "tool_result" => {
+                            let content = block
+                                .get("content")
+                                .map(tool_result_to_text)
+                                .unwrap_or_default();
+                            push_message(
+                                &mut out,
+                                "tool".to_string(),
+                                content,
+                                timestamp.clone(),
+                                None,
+                                true,
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if out.len() >= MAX_TRANSCRIPT_MESSAGES {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn push_message(
+    out: &mut Vec<SessionMessage>,
+    role: String,
+    content: String,
+    timestamp: Option<String>,
+    tool_name: Option<String>,
+    is_tool_result: bool,
+) {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    out.push(SessionMessage {
+        role,
+        content: trimmed.to_string(),
+        timestamp,
+        tool_name,
+        is_tool_result,
+    });
+}
+
+/// One-line summary for a tool_use block. Picks the most identifying
+/// field so the renderer doesn't need to render raw JSON.
+fn summarize_tool_input(input: &Value) -> String {
+    let obj = match input.as_object() {
+        Some(o) => o,
+        None => return String::new(),
+    };
+    for key in [
+        "command",
+        "file_path",
+        "path",
+        "description",
+        "query",
+        "url",
+        "pattern",
+    ] {
+        if let Some(v) = obj.get(key).and_then(Value::as_str) {
+            return v.to_string();
+        }
+    }
+    String::new()
+}
+
+/// tool_result.content is a string OR an array of content blocks.
+fn tool_result_to_text(value: &Value) -> String {
+    if let Some(s) = value.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = value.as_array() {
+        let mut out: Vec<String> = Vec::new();
+        for block in arr {
+            let kind = block.get("type").and_then(Value::as_str).unwrap_or("");
+            match kind {
+                "text" => {
+                    if let Some(t) = block.get("text").and_then(Value::as_str) {
+                        out.push(t.to_string());
+                    }
+                }
+                "image" => out.push("[image]".to_string()),
+                _ => {}
+            }
+        }
+        return out.join("\n");
+    }
+    String::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +636,108 @@ mod tests {
         write(tmp.path(), "projects/-b/sessions-index.json", idx);
         let out = scan_sessions(tmp.path()).unwrap();
         assert_eq!(out.len(), 1);
+    }
+
+    fn write_transcript(dir: &Path, name: &str, content: &str) -> PathBuf {
+        let p = dir.join(name);
+        fs::write(&p, content).unwrap();
+        p
+    }
+
+    #[test]
+    fn parse_session_returns_user_and_assistant_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "happy.jsonl",
+            concat!(
+                "{\"type\":\"user\",\"timestamp\":\"2026-07-09T10:00:00Z\",",
+                "\"message\":{\"role\":\"user\",\"content\":\"Fix the flaky test\"}}\n",
+                "{\"type\":\"assistant\",\"timestamp\":\"2026-07-09T10:00:05Z\",",
+                "\"message\":{\"role\":\"assistant\",\"content\":[",
+                "{\"type\":\"text\",\"text\":\"I found the race condition\"}]}}\n",
+            ),
+        );
+        let out = parse_session_transcript(&path).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].role, "user");
+        assert_eq!(out[0].content, "Fix the flaky test");
+        assert_eq!(out[0].timestamp.as_deref(), Some("2026-07-09T10:00:00Z"));
+        assert_eq!(out[1].role, "assistant");
+        assert_eq!(out[1].content, "I found the race condition");
+    }
+
+    #[test]
+    fn parse_session_skips_malformed_and_unrelated_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "messy.jsonl",
+            concat!(
+                "{not valid json\n",
+                "\n",
+                "{\"type\":\"summary\",\"message\":{\"role\":\"system\"}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",",
+                "\"content\":\"hi back\"}}\n",
+            ),
+        );
+        let out = parse_session_transcript(&path).unwrap();
+        let roles: Vec<_> = out.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant"]);
+    }
+
+    #[test]
+    fn parse_session_extracts_tool_use_and_tool_result() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "tools.jsonl",
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",",
+                "\"content\":[",
+                "{\"type\":\"tool_use\",\"id\":\"1\",\"name\":\"Bash\",",
+                "\"input\":{\"command\":\"ls -la\"}}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",",
+                "\"content\":[",
+                "{\"type\":\"tool_result\",\"tool_use_id\":\"1\",",
+                "\"content\":[{\"type\":\"text\",\"text\":\"file.txt\"}]}]}}\n",
+            ),
+        );
+        let out = parse_session_transcript(&path).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].role, "tool");
+        assert_eq!(out[0].tool_name.as_deref(), Some("Bash"));
+        assert_eq!(out[0].content, "ls -la");
+        assert!(!out[0].is_tool_result);
+        assert!(out[1].is_tool_result);
+        assert_eq!(out[1].content, "file.txt");
+    }
+
+    #[test]
+    fn parse_session_returns_empty_for_empty_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(tmp.path(), "empty.jsonl", "");
+        let out = parse_session_transcript(&path).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn parse_session_marks_thinking_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "thinking.jsonl",
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",",
+                "\"content\":[",
+                "{\"type\":\"thinking\",\"thinking\":\"pondering\"},",
+                "{\"type\":\"text\",\"text\":\"answer\"}]}}\n",
+            ),
+        );
+        let out = parse_session_transcript(&path).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(out[0].content.starts_with("[thinking]"));
+        assert_eq!(out[1].content, "answer");
     }
 }

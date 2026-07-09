@@ -340,3 +340,20 @@ export interface SessionSummary {
   /** Absolute path to the `.jsonl` transcript. */
   full_path: string;
 }
+
+/**
+ * One message in a parsed session transcript. Mirrors `SessionMessage`
+ * in `src-tauri/src/storage/sessions.rs`. The renderer routes on `role`:
+ * - `user` — plain prose with a blue prefix
+ * - `assistant` — markdown content
+ * - `tool` (with `tool_name`) — tool invocation, one-line summary
+ * - `tool` (with `is_tool_result`) — tool output, dim monospace box
+ * - anything else — plain text
+ */
+export interface SessionMessage {
+  role: string;
+  content: string;
+  timestamp: string | null;
+  tool_name: string | null;
+  is_tool_result: boolean;
+}

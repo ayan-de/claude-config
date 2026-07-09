@@ -115,7 +115,7 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
     label: "Sessions",
     icon: History,
     tooltip:
-      "Claude Code conversation sessions stored on this PC. Click a row to reveal the transcript in your file manager.",
+      "Claude Code conversation sessions stored on this PC. Click a row to read the transcript.",
     SidebarButton: SessionsSidebarButton,
     Component: SessionsView,
   },

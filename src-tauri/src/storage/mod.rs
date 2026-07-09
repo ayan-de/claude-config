@@ -15,7 +15,7 @@ pub use credentials::{credentials_path, read_credentials_oauth, write_credential
 pub use keyring::{KeyringStatus, KeyringStore};
 pub use marketplaces::{scan_marketplaces, MarketplaceSummary};
 pub use mcp::{scan_mcp_servers, McpServerSummary};
-pub use sessions::{scan_sessions, SessionSummary};
+pub use sessions::{parse_session_transcript, scan_sessions, SessionMessage, SessionSummary};
 pub use skills::{scan_skills, SkillSummary};
 pub use providers::{load_providers_file, save_providers_file};
 pub use settings::{discover_claude_dir, read_settings, settings_path, write_settings_atomic};

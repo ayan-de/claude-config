@@ -8,6 +8,7 @@ import type {
   McpServerSummary,
   Provider,
   ProviderInput,
+  SessionMessage,
   SessionSummary,
   SkillSummary,
   TrackerConfigView,
@@ -85,6 +86,13 @@ export const listMcpServers = () =>
  * empty array when no sessions exist yet.
  */
 export const listSessions = () => call<SessionSummary[]>("list_sessions_cmd");
+
+/**
+ * Parses a Claude Code `.jsonl` transcript at `path` into a flat list
+ * of messages. Used by the in-app transcript viewer.
+ */
+export const parseSession = (path: string) =>
+  call<SessionMessage[]>("parse_session_cmd", { path });
 
 // ---------- providers ----------
 
