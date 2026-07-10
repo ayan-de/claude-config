@@ -212,7 +212,23 @@ pub fn b64_encode(bytes: &[u8]) -> String {
 
 pub fn b64_decode(s: &str) -> Result<Vec<u8>, GitHubError> {
     use base64::Engine as _;
+    // GitHub's blob API returns base64 line-wrapped with `\n` every 60 chars;
+    // the STANDARD engine rejects whitespace, so strip it before decoding.
+    let cleaned: String = s.chars().filter(|c| !c.is_ascii_whitespace()).collect();
     base64::engine::general_purpose::STANDARD
-        .decode(s)
+        .decode(&cleaned)
         .map_err(|e| GitHubError::Parse(format!("base64 decode: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn b64_decode_ignores_github_line_wraps() {
+        // GitHub wraps at 60 chars — reproduce a newline at offset 60.
+        let raw = b64_encode(&vec![b'x'; 90]);
+        let wrapped = format!("{}\n{}", &raw[..60], &raw[60..]);
+        assert_eq!(b64_decode(&wrapped).unwrap(), vec![b'x'; 90]);
+    }
 }
