@@ -11,8 +11,10 @@ import {
   MessageSquare,
   RefreshCw,
   Terminal,
+  Trash2,
   Wrench,
 } from "lucide-react";
+import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -24,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { GithubIcon } from "@/components/GitHubSync";
+import { SessionDeleteDialog } from "@/components/SessionDeleteDialog";
 import { useSessionTranscript, useSessions } from "@/hooks/useSessions";
 import { useSessionUpload } from "@/hooks/useSessionUpload";
 import {
@@ -31,6 +34,7 @@ import {
   useSessionUploadContext,
 } from "@/hooks/SessionUploadContext";
 import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
+import { deleteSession } from "@/lib/api";
 import type { SessionMessage, SessionSummary, SyncState } from "@/lib/types";
 import type {
   GlobalTabProps,
@@ -91,8 +95,33 @@ const UNGROUPED_KEY = "__ungrouped__";
 export function SessionsView({ onClose }: GlobalTabProps) {
   const { sessions, loading, refresh } = useSessions();
   const { config } = useGitHubSyncContext();
-  const { stateById, uploadingIds, upload } = useSessionUpload(sessions);
+  const { stateById, uploadingIds, upload, seed } = useSessionUpload(sessions);
   const [selected, setSelected] = useState<SessionSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const onConfirmDelete = async () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleting(true);
+    try {
+      await deleteSession(target.full_path);
+      const refreshed = await refresh();
+      // Re-seed the upload state map so the deleted session drops out of
+      // stateById. useSessionUpload's built-in re-seed effect is gated on
+      // isWebEnv() and never fires in the Tauri desktop app, so this
+      // explicit call is required.
+      await seed(refreshed);
+      if (selected?.session_id === target.session_id) setSelected(null);
+      toast.success("Session deleted");
+      setDeleteTarget(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Delete failed: ${msg}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const initialLoad = sessions.length === 0 && loading;
 
@@ -185,7 +214,11 @@ export function SessionsView({ onClose }: GlobalTabProps) {
               connected: config.isConnected,
             }}
           >
-            <ProjectAccordion groups={groups} onSelect={setSelected} />
+            <ProjectAccordion
+              groups={groups}
+              onSelect={setSelected}
+              onRequestDelete={setDeleteTarget}
+            />
           </SessionUploadProvider>
         </>
       )}
@@ -196,6 +229,15 @@ export function SessionsView({ onClose }: GlobalTabProps) {
           {groups.length} project{groups.length === 1 ? "" : "s"}
         </p>
       )}
+
+      <SessionDeleteDialog
+        open={!!deleteTarget}
+        sessionTitle={deleteTarget?.title ?? ""}
+        projectName={deleteTarget?.project_name ?? null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onConfirm={onConfirmDelete}
+        isDeleting={deleting}
+      />
     </div>
   );
 }
@@ -209,9 +251,11 @@ export function SessionsView({ onClose }: GlobalTabProps) {
 function ProjectAccordion({
   groups,
   onSelect,
+  onRequestDelete,
 }: {
   groups: ProjectGroup[];
   onSelect: (s: SessionSummary) => void;
+  onRequestDelete: (s: SessionSummary) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(groups[0] ? [groups[0].key] : []),
@@ -256,6 +300,7 @@ function ProjectAccordion({
           open={expanded.has(group.key)}
           onToggle={() => toggle(group.key)}
           onSelect={onSelect}
+          onRequestDelete={onRequestDelete}
         />
       ))}
     </div>
@@ -315,11 +360,13 @@ function SessionGroup({
   open,
   onToggle,
   onSelect,
+  onRequestDelete,
 }: {
   group: ProjectGroup;
   open: boolean;
   onToggle: () => void;
   onSelect: (s: SessionSummary) => void;
+  onRequestDelete: (s: SessionSummary) => void;
 }) {
   const segments = useMemo(
     () => splitBreadcrumbs(group.label),
@@ -399,6 +446,7 @@ function SessionGroup({
               key={s.session_id}
               session={s}
               onSelect={onSelect}
+              onRequestDelete={onRequestDelete}
             />
           ))}
         </ul>
@@ -439,9 +487,10 @@ function BreadcrumbPath({ segments }: { segments: string[] }) {
 interface RowProps {
   session: SessionSummary;
   onSelect: (s: SessionSummary) => void;
+  onRequestDelete: (s: SessionSummary) => void;
 }
 
-function SessionRow({ session, onSelect }: RowProps) {
+function SessionRow({ session, onSelect, onRequestDelete }: RowProps) {
   const uploadCtx = useSessionUploadContext();
   return (
     <li
@@ -490,6 +539,18 @@ function SessionRow({ session, onSelect }: RowProps) {
         </div>
       </button>
       <SessionSyncButton session={session} ctx={uploadCtx} />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRequestDelete(session);
+        }}
+        aria-label="Delete session"
+        title="Delete session"
+        className="mt-2 shrink-0 rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
     </li>
   );
 }
