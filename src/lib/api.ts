@@ -118,6 +118,14 @@ export const listSessions = () => call<SessionSummary[]>("list_sessions_cmd");
 export const parseSession = (path: string) =>
   call<SessionMessage[]>("parse_session_cmd", { path });
 
+/**
+ * Deletes a single Claude Code session: moves the `.jsonl` to OS Trash
+ * and strips the entry from `sessions-index.json`. Local-only; the
+ * GitHub-synced copy (if any) is untouched.
+ */
+export const deleteSession = (fullPath: string) =>
+  call<void>("delete_session_cmd", { fullPath });
+
 // ---------- providers ----------
 
 export const listProviders = () => call<Provider[]>("list_providers_cmd");
