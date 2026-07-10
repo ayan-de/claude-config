@@ -154,7 +154,7 @@ Copy:
    />
    ```
 
-5. The `useSessionUpload` hook should clear its in-memory state for the deleted session. The hook exposes `seed(sessions)` which re-derives `stateById` from the current list. After `refresh()` from `useSessions` returns the new (smaller) list, call `seed(newSessions)` to drop the deleted session from the upload state map. No special API on the upload hook — it's already designed for this.
+5. (No additional hook wiring — the explicit `await seed(refreshed)` call inside `onConfirmDelete` above is the complete re-seed path. The existing re-seed effect in `useSessionUpload` is gated on `isWebEnv()` and never fires in the Tauri desktop app, so the explicit call is required and sufficient.)
 
 No changes to:
 - `src/lib/types.ts` (uses existing `SessionSummary`).
