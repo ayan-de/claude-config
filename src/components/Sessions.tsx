@@ -159,16 +159,35 @@ export function SessionsView({ onClose }: GlobalTabProps) {
           </p>
         </div>
       ) : (
-        <SessionUploadProvider
-          value={{
-            stateById,
-            uploadingIds,
-            upload,
-            connected: config.isConnected,
-          }}
-        >
-          <ProjectAccordion groups={groups} onSelect={setSelected} />
-        </SessionUploadProvider>
+        <>
+          {config.isConnected && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-card/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+              <span className="font-medium text-foreground/80">GitHub sync:</span>
+              <span className="inline-flex items-center gap-1.5">
+                <GithubIcon className="size-3 text-muted-foreground/50" />
+                Not yet uploaded
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <GithubIcon className="size-3 text-amber-600 dark:text-amber-400" />
+                Local changes since upload
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <GithubIcon className="size-3 text-primary" />
+                Uploaded to GitHub
+              </span>
+            </div>
+          )}
+          <SessionUploadProvider
+            value={{
+              stateById,
+              uploadingIds,
+              upload,
+              connected: config.isConnected,
+            }}
+          >
+            <ProjectAccordion groups={groups} onSelect={setSelected} />
+          </SessionUploadProvider>
+        </>
       )}
 
       {!initialLoad && sessions.length > 0 && (
