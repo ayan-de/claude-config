@@ -298,6 +298,7 @@ mod tests {
             schema_version: 1,
             is_connected: true,
             username: Some("octocat".into()),
+            avatar_url: None,
             repo_name: "claude-sessions".into(),
             last_sync: Some("2026-07-09T12:00:00Z".into()),
             privacy_consent_given: true,

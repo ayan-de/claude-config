@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useGitHubSync } from "@/hooks/useGitHubSync";
 import { cn } from "@/lib/utils";
+import type { GitHubPollOutcome } from "@/lib/types";
 
 /**
  * Inline GitHub mark — lucide-react doesn't ship a `Github` icon, so
@@ -239,10 +240,11 @@ export function GitHubSyncPanel({ className }: GitHubSyncPanelProps) {
       <DeviceFlowModal
         open={modalOpen}
         phase={phase}
-        onPoll={() => {
+        onPoll={async () => {
           if (phase.kind === "waiting" || phase.kind === "polling") {
-            void pollOnce(phase.flow.deviceCode);
+            return await pollOnce(phase.flow.deviceCode);
           }
+          return null;
         }}
         onClose={() => reset()}
       />
@@ -354,7 +356,7 @@ function DeviceFlowModal({
 }: {
   open: boolean;
   phase: ReturnType<typeof useGitHubSync>["phase"];
-  onPoll: () => void;
+  onPoll: () => Promise<GitHubPollOutcome | null>;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -378,13 +380,24 @@ function DeviceFlowModal({
       }
       return;
     }
-    intervalRef.current = 5000;
-    const tick = () => {
-      onPoll();
-      timerRef.current = setTimeout(tick, intervalRef.current);
+    intervalRef.current = (phase.kind === "waiting" || phase.kind === "polling" ? (phase.flow.interval || 5) : 5) * 1000;
+    let active = true;
+    const tick = async () => {
+      if (!active) return;
+      try {
+        const outcome = await onPoll();
+        if (outcome && outcome.status === "slow_down") {
+          intervalRef.current += 5000;
+        }
+      } finally {
+        if (active) {
+          timerRef.current = setTimeout(tick, intervalRef.current);
+        }
+      }
     };
     timerRef.current = setTimeout(tick, 0);
     return () => {
+      active = false;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;

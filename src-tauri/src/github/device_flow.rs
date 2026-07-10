@@ -156,5 +156,5 @@ pub fn poll_device_flow(device_code: &str) -> Result<DeviceFlowOutcome, GitHubEr
 }
 
 fn fetch_user(token: &str) -> Result<GitHubUser, GitHubError> {
-    GitHubClient::get_json(&format!("{}/user", crate::github::client::GITHUB_API_BASE), token)
+    GitHubClient::get_json(token, &format!("{}/user", crate::github::client::GITHUB_API_BASE))
 }

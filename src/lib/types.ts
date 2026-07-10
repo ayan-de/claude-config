@@ -404,7 +404,7 @@ export type GitHubPollOutcome =
   | { status: "slow_down" }
   | { status: "denied" }
   | { status: "expired" }
-  | { status: "authorized"; username: string; avatarUrl: string | null };
+  | { status: "authorized"; username: string; avatarUrl: string | null; avatar_url?: string | null };
 
 /** One entry in the per-project path-mapping table. */
 export interface ProjectPathMapping {

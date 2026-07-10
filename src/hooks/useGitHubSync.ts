@@ -86,29 +86,35 @@ export function useGitHubSync() {
   }, []);
 
   const pollOnce = useCallback(
-    async (deviceCode: string): Promise<GitHubPollOutcome> => {
-      const outcome = await githubPollDeviceFlow(deviceCode);
-      switch (outcome.status) {
-        case "authorized":
-          setPhase({
-            kind: "success",
-            username: outcome.username,
-            avatarUrl: outcome.avatarUrl,
-          });
-          await refresh();
-          break;
-        case "denied":
-          setPhase({ kind: "denied" });
-          break;
-        case "expired":
-          setPhase({ kind: "expired" });
-          break;
-        case "pending":
-        case "slow_down":
-          // Keep waiting — caller is responsible for the timer.
-          break;
+    async (deviceCode: string): Promise<GitHubPollOutcome | null> => {
+      try {
+        const outcome = await githubPollDeviceFlow(deviceCode);
+        switch (outcome.status) {
+          case "authorized":
+            setPhase({
+              kind: "success",
+              username: outcome.username,
+              avatarUrl: outcome.avatar_url ?? outcome.avatarUrl,
+            });
+            await refresh();
+            break;
+          case "denied":
+            setPhase({ kind: "denied" });
+            break;
+          case "expired":
+            setPhase({ kind: "expired" });
+            break;
+          case "pending":
+          case "slow_down":
+            // Keep waiting — caller is responsible for the timer.
+            break;
+        }
+        return outcome;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setPhase({ kind: "error", message });
+        return null;
       }
-      return outcome;
     },
     [refresh],
   );
