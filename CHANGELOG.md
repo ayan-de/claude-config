@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-10
+
+### Added
+- **Session management** — delete (OS-Trash via `trash` crate), real titles read from `.jsonl`, in-app transcript viewer, sidebar integration, GitHub sync state per row, accordion grouping by project
+- **GitHub sync** — full upload pipeline (`upload_session`, sync-state read), OAuth flow with improved polling, configuration management, context-based state sharing, upload orchestration over Git Data API
+- **Sessions UI** — GitHub sync status breakdown in `SessionGroup`, legend in `Sessions.tsx`, upload icon with 4 sync states, project path on each session summary
+- **Claude skill** — `.claude/skills/release/` for release workflow
+
+### Changed
+- GitHub sync refactored to use `GitHubSyncContext` for shared state
+- Theme script handling refactored in `RootLayout` for readability and performance
+
+### Fixed
+- Bucket-order rename loss in session title priority (`jsonl.customTitle` / `aiTitle` override index title)
+
+### Removed
+- 8-char uuid tag from session list rows (replaced with real title)
+
 ## [0.5.8] - 2026-07-07
 
 ### Added
