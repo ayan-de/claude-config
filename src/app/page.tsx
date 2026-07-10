@@ -14,18 +14,28 @@ import { Main } from "@/components/Main";
 import { TitleBar } from "@/components/TitleBar";
 import { DangerousModeConfirm } from "@/components/DangerousModeConfirm";
 import { GitHubTopBarButton } from "@/components/GitHubTopBarButton";
-import { useGitHubSync } from "@/hooks/useGitHubSync";
+import { GitHubSyncProvider, useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 
 import { GLOBAL_TABS } from "@/data/globalTabs";
 import { version as appVersion } from "../../package.json";
 import { cn } from "@/lib/utils";
 
 export default function Page() {
+  // Provider must wrap the consumer. Splitting into an outer wrapper + an
+  // inner shell keeps the hook call inside the provider context.
+  return (
+    <GitHubSyncProvider>
+      <PageShell />
+    </GitHubSyncProvider>
+  );
+}
+
+function PageShell() {
   const providers = useProvidersApp();
   const panel = useGlobalPanel();
   const updater = useUpdater();
   const dangerous = useDangerousMode();
-  const github = useGitHubSync();
+  const github = useGitHubSyncContext();
 
   if (!providers.mounted) {
     return (

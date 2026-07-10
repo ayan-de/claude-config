@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useGitHubSync } from "@/hooks/useGitHubSync";
+import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { cn } from "@/lib/utils";
 import type { GitHubPollOutcome } from "@/lib/types";
 
@@ -105,7 +105,7 @@ export function GitHubSyncPanel({ className }: GitHubSyncPanelProps) {
     disconnect,
     setRepoName,
     setPrivacyConsent,
-  } = useGitHubSync();
+  } = useGitHubSyncContext();
 
   const [repoNameInput, setRepoNameInput] = useState(config.repoName);
   const [savedRepoName, setSavedRepoName] = useState(false);
@@ -155,7 +155,6 @@ export function GitHubSyncPanel({ className }: GitHubSyncPanelProps) {
         <ConnectionBadge
           loading={loading}
           isConnected={config.isConnected}
-          username={config.username ?? null}
         />
       </div>
 
@@ -164,6 +163,7 @@ export function GitHubSyncPanel({ className }: GitHubSyncPanelProps) {
         {config.isConnected ? (
           <ConnectedActions
             username={config.username ?? null}
+            avatarUrl={config.avatarUrl ?? null}
             onDisconnect={() => void disconnect()}
           />
         ) : (
@@ -255,11 +255,9 @@ export function GitHubSyncPanel({ className }: GitHubSyncPanelProps) {
 function ConnectionBadge({
   loading,
   isConnected,
-  username,
 }: {
   loading: boolean;
   isConnected: boolean;
-  username: string | null;
 }) {
   if (loading) {
     return (
@@ -278,9 +276,9 @@ function ConnectionBadge({
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+    <span className="inline-flex items-center gap-1.5 rounded-lg border bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
       <CheckCircle2 className="size-3" />
-      Connected as {username ?? "unknown"}
+      Connected
     </span>
   );
 }
@@ -327,17 +325,36 @@ function DisconnectedActions({
 
 function ConnectedActions({
   username,
+  avatarUrl,
   onDisconnect,
 }: {
   username: string | null;
+  avatarUrl: string | null;
   onDisconnect: () => void;
 }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4">
-      <div className="text-sm">
-        <div className="font-medium">{username ?? "GitHub user"}</div>
-        <div className="text-xs text-muted-foreground">
-          Sync is active. Click disconnect to remove stored credentials.
+      <div className="flex min-w-0 items-center gap-3">
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={avatarUrl}
+            alt={username ? `${username} GitHub avatar` : "GitHub avatar"}
+            className="size-10 shrink-0 rounded-full object-cover ring-1 ring-foreground/15"
+            draggable={false}
+          />
+        ) : (
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted ring-1 ring-foreground/15">
+            <GithubIcon className="size-5 text-muted-foreground" />
+          </div>
+        )}
+        <div className="min-w-0 text-sm">
+          <div className="truncate font-medium">
+            {username ?? "GitHub user"}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Sync is active. Click disconnect to remove stored credentials.
+          </div>
         </div>
       </div>
       <Button type="button" variant="outline" onClick={onDisconnect}>
@@ -355,7 +372,7 @@ function DeviceFlowModal({
   onClose,
 }: {
   open: boolean;
-  phase: ReturnType<typeof useGitHubSync>["phase"];
+  phase: ReturnType<typeof useGitHubSyncContext>["phase"];
   onPoll: () => Promise<GitHubPollOutcome | null>;
   onClose: () => void;
 }) {
