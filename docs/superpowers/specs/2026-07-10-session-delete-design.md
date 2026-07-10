@@ -32,13 +32,14 @@ pub fn delete_session_cmd(
 ) -> AppResult<()>
 ```
 
-Responsibilities:
+Responsibilities (in this order — trash first so a crash never silently leaves an orphaned file on disk):
 1. Validate `full_path` is non-empty.
 2. Validate `full_path` resolves under `<claude_dir>/projects/` (security: prevent the UI from asking the backend to trash arbitrary paths like `~/.ssh/id_rsa`). Uses `std::path::Path::starts_with` on canonicalized forms.
-3. Resolve the project directory: the parent of the `.jsonl` file is the project directory; `sessions-index.json` lives there.
-4. Load `sessions-index.json` if present. Rewrite it without the entry whose `fullPath == full_path`. Save atomically (write to `sessions-index.json.tmp`, `fsync`, rename — same pattern as `storage/settings.rs`).
-5. If `sessions-index.json` is absent (unindexed session): skip step 4 silently.
-6. Call `trash::delete_all([full_path])` — idempotent on a missing file (trash crate returns Ok if the file is gone).
+3. Call `trash::delete_all([full_path])` — idempotent on a missing file (trash crate returns Ok if the file is gone).
+4. Resolve the project directory: the parent of the `.jsonl` file is the project directory; `sessions-index.json` lives there.
+5. If `sessions-index.json` is present, load it, drop the entry whose `fullPath == full_path`, and save atomically (write to `sessions-index.json.tmp`, `fsync`, rename — same pattern as `storage/settings.rs`). If absent (unindexed session): skip silently.
+
+**Why trash-first:** the failure mode of "strip index, then crash before trashing" leaves an orphaned `.jsonl` invisible to the UI — the user's data is gone from their perspective but actually recoverable on disk. The failure mode of "trash first, then crash before stripping" leaves a stale index entry that the scanner self-heals on next refresh (`summary_from_jsonl_stat` and the jsonl-fallback loop both tolerate a missing `.jsonl`). Trash-first never silently loses data.
 
 Errors:
 - `AppError::Validation` — empty path or path outside `projects/`.
@@ -100,6 +101,8 @@ Copy:
 
 3. **`SessionsView`** orchestrates state:
    ```tsx
+   const { sessions, loading, refresh } = useSessions();
+   const { stateById, uploadingIds, upload, seed } = useSessionUpload(sessions);
    const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
    const [deleting, setDeleting] = useState(false);
 
@@ -108,10 +111,15 @@ Copy:
      setDeleting(true);
      try {
        await deleteSession(deleteTarget.full_path);
-       await refresh();
-       // Re-seed the upload state map so the deleted session drops out.
-       // (Done implicitly because useSessions.refresh() updates the
-       // `sessions` array, which useSessionUpload derives from via seed().)
+       // refresh() returns the freshly-fetched sessions array (small
+       // change to useSessions.ts — current implementation returns void,
+       // we extend it to return SessionSummary[]).
+       const refreshed = await refresh();
+       // Re-seed the upload state map so the deleted session drops out of
+       // stateById. The existing re-seed effect in useSessionUpload is
+       // gated on isWebEnv() and never fires in the Tauri desktop app,
+       // so this explicit call is required, not optional.
+       await seed(refreshed);
        if (selected?.session_id === deleteTarget.session_id) setSelected(null);
        toast.success("Session deleted");
        setDeleteTarget(null);
@@ -122,6 +130,17 @@ Copy:
      }
    };
    ```
+
+   **Required supporting change** — `src/hooks/useSessions.ts`:
+   `refresh` currently returns `void`. Change the signature and body so it returns `Promise<SessionSummary[]>` (the same `list` it sets into state). One-line change:
+   ```ts
+   const refresh = useCallback(async (): Promise<SessionSummary[]> => {
+     // ... existing body ...
+     setSessions(list);
+     return list;
+   }, []);
+   ```
+   No other caller relies on the void return today (callers `void refresh()` ignore it either way).
 
 4. **`SessionsView`** mounts `<SessionDeleteDialog>` once, after the existing list render:
    ```tsx
@@ -155,8 +174,9 @@ User confirms
   → onConfirmDelete runs
     → await deleteSession(full_path)
       → Tauri invoke("delete_session_cmd", { fullPath })
-        → Rust: validate path → strip from sessions-index.json → trash::delete_all(.jsonl)
-    → refresh() — re-fetches the session list from the backend
+        → Rust: validate path → trash::delete_all(.jsonl) → strip from sessions-index.json
+    → const refreshed = await refresh() — refresh returns the new SessionSummary[]
+    → await seed(refreshed) — re-derive stateById so deleted id drops out
     → if selected.session_id matches, setSelected(null) — closes detail panel
     → toast.success("Session deleted")
     → setDeleteTarget(null) — closes dialog
@@ -170,14 +190,14 @@ On error
 
 | Failure | Behavior |
 |---|---|
-| `full_path` empty | `AppError::Validation` → toast "Invalid session path" |
-| `full_path` outside `projects/` | `AppError::Validation` → toast "Invalid session path" |
-| `sessions-index.json` malformed JSON | `AppError::Io` → toast "Delete failed: ..." — partial state: file NOT trashed. Acceptable; user can retry. |
-| `trash::delete_all` fails | `AppError::Io` → toast "Delete failed: ..." — partial state: index IS stripped. Acceptable; the file will re-appear on next scan if Claude Code recreates it (it won't — the file is gone from the index, the .jsonl is still there). |
-| `.jsonl` already missing | `trash::delete_all` returns Ok (idempotent). |
+| `full_path` empty | `AppError::Validation` → toast "Invalid session path". No file touched. |
+| `full_path` outside `projects/` | `AppError::Validation` → toast "Invalid session path". No file touched. |
+| `trash::delete_all` fails | `AppError::Io` → toast "Delete failed: ...". No file touched (trash-first). User can retry safely. |
+| `sessions-index.json` malformed JSON | `AppError::Io` → toast "Delete failed: ...". The `.jsonl` is already trashed (trash-first); the stale index entry self-heals on next scanner refresh. |
+| `.jsonl` already missing | `trash::delete_all` returns Ok (idempotent). Index strip proceeds. |
 | `sessions-index.json` missing | Skipped silently — unindexed session. |
 
-The "partial state on failure" outcomes are recoverable: a stale index entry re-appears in the UI but the file is gone, so the row shows but clicking it shows a friendly empty state. A stale .jsonl with no index entry is invisible until Claude Code rebuilds the index — but the user wanted to delete it, so this is fine.
+Trash-first means the only partial-failure state is "stale index entry that self-heals on next scan." We never silently lose a file the user expected to delete.
 
 ## Testing
 
@@ -185,12 +205,14 @@ The "partial state on failure" outcomes are recoverable: a stale index entry re-
 
 In `src-tauri/src/storage/sessions.rs` (or the new `commands/sessions.rs` if command-level testing):
 
-1. `delete_session_cmd strips entry from sessions-index.json` — index has 3 entries; delete the middle one; assert index has 2 + correct ids; assert file write was atomic (no temp file lingering).
+1. `delete_session_cmd strips entry from sessions-index.json` — index has 3 entries; delete the middle one; assert the reloaded index has 2 entries with the correct ids; assert no temp file (`sessions-index.json.tmp`) is left behind.
 2. `delete_session_cmd unindexed: no index write, file removed` — only a .jsonl under `projects/-x/` with no `sessions-index.json`; command returns Ok; .jsonl is gone.
 3. `delete_session_cmd idempotent on missing file` — .jsonl already gone; command returns Ok; no panic.
 4. `delete_session_cmd rejects empty full_path` — returns `AppError::Validation`.
 5. `delete_session_cmd rejects path outside projects/` — `full_path = /etc/passwd`; returns `AppError::Validation`.
-6. `delete_session_cmd preserves other index entries` — index has 3 entries; delete the second; assert entries 1 and 3 are byte-identical to before.
+6. `delete_session_cmd preserves other index entries (structural)` — index has 3 entries; delete the second; parse both before and after into typed `SessionsIndex` and assert that the entries with the surviving ids are field-by-field equal (NOT byte-identical — serde_json round-trip does not preserve key order, whitespace, or float formatting).
+
+**About the round-trip:** the implementation deserializes the index via `serde_json::from_str`, mutates the entries Vec, and reserializes via `serde_json::to_writer_pretty` (or `to_string`). It does NOT do surgical in-place JSON editing. Tests asserting byte-identity would be flaky. Structural equality on parsed values is the right invariant.
 
 Note: `trash::delete_all` is a thin wrapper around the platform's tested native API. Tests assert observable side effects (index rewrites, file existence) and do not mock the trash crate. If a CI environment has no trash facility, add a `#[ignore]` attribute on the affected test, matching the project's existing `keyring` integration-test pattern.
 
