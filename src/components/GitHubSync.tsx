@@ -349,8 +349,14 @@ function ConnectedActions({
           </div>
         )}
         <div className="min-w-0 text-sm">
-          <div className="truncate font-medium">
-            {username ?? "GitHub user"}
+          <div className="flex items-center gap-1.5 truncate font-medium">
+            <span>{username ?? "GitHub user"}</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/tick.svg"
+              alt=""
+              className="size-3.5 object-contain shrink-0"
+            />
           </div>
           <div className="text-xs text-muted-foreground">
             Sync is active. Click disconnect to remove stored credentials.
