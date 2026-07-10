@@ -20,8 +20,10 @@ The user wants the same human-readable title that `/resume` shows — the
 
 ## Goals
 
-- Title shown in the list row matches what `/resume` shows for the same
-  session.
+- Title shown in the list row matches what `/resume` *intends* to show
+  for the same session: the user-set title always wins over the
+  auto-generated one, even when the user's rename has been pushed out
+  of the 64KB tail window by subsequent activity.
 - Unindexed sessions stop showing `(unindexed) <uuid>` when the `.jsonl`
   contains a `customTitle` or `aiTitle`.
 - The 8-character UUID tag in the list row is removed; the full UUID
@@ -31,8 +33,8 @@ The user wants the same human-readable title that `/resume` shows — the
 
 ## Non-goals
 
-- Indexing the title reads into a cache. The 64KB tail-read per session is
-  cheap enough at current scale.
+- Indexing the title reads into a cache. The head+tail 64KB read per
+  session (≤128KB total) is cheap enough at current scale.
 - Per-session title invalidation. `useSessions` already re-fetches on
   mount; the title re-reads with the rest.
 - A separate IPC command for the title. The override happens inside the
@@ -40,8 +42,9 @@ The user wants the same human-readable title that `/resume` shows — the
 - Frontend title writes. Users still rename via `/rename`; this app only
   reads.
 - Whole-file scan of the `.jsonl` to defeat the upstream 64KB eviction.
-  Tail-only matches `/resume` and is good enough for ~all real sessions.
-  Revisit if a user reports a wrong title on a long session.
+  Head+tail (128KB total) is enough for ~all real sessions. Revisit
+  only if a user reports a wrong title on a session where the title
+  has been pushed out of *both* 64KB windows.
 
 ## Design
 
@@ -51,37 +54,39 @@ New helper in `src-tauri/src/storage/sessions.rs`:
 
 ```rust
 /// Reads the first and last 64KB of a transcript and returns the
-/// user-set or auto-generated title, matching `/resume`'s precedence.
-/// Two-bucket read; same shape as upstream's `readSessionLite`.
+/// user-set or auto-generated title. Type-first priority: the user's
+/// rename always wins over the AI title, even when the rename has
+/// been pushed out of the tail 64KB window by later activity.
 ///
-/// Priority: customTitle (tail) → aiTitle (tail) → customTitle (head)
+/// Priority: customTitle (tail) → customTitle (head) → aiTitle (tail)
 /// → aiTitle (head) → None.
 ///
-/// `ponytail: head+tail 64KB windows, mirrors upstream /resume. Loses
-/// titles that scrolled past BOTH windows (≈ rare, requires thousands
-/// of post-title messages). Bump to whole-file scan if a user reports
-/// a wrong title on a long session.`
+/// `ponytail: head+tail 64KB windows. Differs from upstream /resume's
+/// bucket-first order (tail→head, types interleaved) by checking
+/// customTitle across both buffers before falling through to aiTitle.
+/// Fixes the silent-rename-loss case where a /rename gets tail-evicted
+/// and a later aiTitle is in the tail. Same I/O, strictly better.`
 fn extract_title_from_jsonl(path: &Path) -> Option<String>
 ```
 
 The helper is hand-rolled — open the file, seek to EOF, read up to 64KB
 backwards, then seek to 0 and read up to 64KB forwards. Scan both
 buffers for the last occurrence of `"customTitle":"…"` and
-`"aiTitle":"…"` in priority order. The line-scanning mirrors
+`"aiTitle":"…"` in the priority order above. The line-scanning mirrors
 `extractLastJsonStringField` upstream (a left-to-right `indexOf` loop,
-last-one-wins), so we get identical behavior without depending on
-Node-side code or shelling out.
+last-one-wins per buffer), so we get the same `last-wins` behavior
+without depending on Node-side code or shelling out.
 
-Title precedence in the helper:
+Title precedence in the helper (type-first, not bucket-first):
 
 ```
-customTitle  (from tail)   // /rename'd, wins
+customTitle  (from tail)   // /rename, recent
   ↓
-aiTitle      (from tail)   // Claude auto-titled
+customTitle  (from head)   // /rename, tail-evicted — STILL wins
   ↓
-customTitle  (from head)   // tail-evicted customTitle, head fallback
+aiTitle      (from tail)   // Claude auto-titled, recent
   ↓
-aiTitle      (from head)   // tail-evicted aiTitle
+aiTitle      (from head)   // Claude auto-titled, head only
   ↓
 None
 ```
@@ -127,7 +132,7 @@ No TypeScript type changes, no API changes, no hook changes.
 ```
 ~/.claude/projects/<encoded-dir>/sessions-index.json
                   │
-                  ▼  + .jsonl tail-64KB read for title override
+                  ▼  + .jsonl head+tail 64KB read for title override
 src-tauri/src/storage/sessions.rs::scan_sessions()
                   │
                   ▼  Vec<SessionSummary>  (title field is now real)
@@ -156,20 +161,29 @@ The data flow diagram is identical to today's — only the contents of the
 - **Title contains escaped characters** (`\"`, `\\`): the
   last-one-wins extractor handles JSON string escapes; the Rust
   implementation will mirror the same approach.
+- **Head fallback for tail-evicted titles**: the helper reads BOTH
+  the head and tail 64KB windows, and checks `customTitle` in the
+  head *before* falling through to `aiTitle` in the tail. This
+  closes the silent-rename-loss case where `/rename`'d titles get
+  pushed out of the tail by later activity, then a fresh `aiTitle`
+  lands in the tail. (This is a deliberate improvement over
+  upstream `/resume`'s bucket-first order, at zero extra I/O cost.)
 - **Title present in both index `summary` and `.jsonl` `aiTitle`**:
   `aiTitle` wins (it was set later, it's the better signal of what the
   session is *about*).
 - **User renamed the session multiple times** (`/rename` × N):
   last-one-wins extracts the most recent `customTitle`.
-- **Head fallback for tail-evicted titles**: the 64KB tail is the
-  primary window. Adding the head fallback is a follow-up if a user
-  reports a long session showing the wrong title; document the
-  ponytail ceiling and the upgrade path in the comment.
+- **Title has been pushed out of BOTH 64KB windows** (≈ requires
+  thousands of post-title messages): the helper returns `None`;
+  the existing index `summary` / `first_prompt` fallback chain takes
+  over. Document the ponytail ceiling in the comment and bump to
+  whole-file scan if a user reports it.
 
 ## Out of scope (ponytail: deliberately deferred)
 
-- Whole-file scan to defeat 64KB tail eviction. Add when a user reports
-  a wrong title on a long session.
+- Whole-file scan to defeat BOTH-window eviction. Add when a user
+  reports a wrong title on a session where the title has been pushed
+  past both the head and tail 64KB windows.
 - Frontend cache for title reads. Add when `scan_sessions` becomes a
   bottleneck on large project histories.
 - Indexing the title into `sessions-index.json` (writing back). User
@@ -186,6 +200,9 @@ The data flow diagram is identical to today's — only the contents of the
   - `aiTitle` only → returns it
   - both `customTitle` and `aiTitle` → returns the last `customTitle`
   - `customTitle` appears twice → returns the later one
+  - **`customTitle` only in head, `aiTitle` only in tail → returns
+    `customTitle` (the bucket-order fix; this is the case that fails
+    under /resume's bucket-first order)**
   - no title at all → returns `None`
   - title with escaped quotes → returns the unescaped string
 - Manual: run the app, verify a renamed session shows the renamed
