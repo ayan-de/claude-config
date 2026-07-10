@@ -7,3 +7,4 @@
 pub mod client;
 pub mod device_flow;
 pub mod repo;
+pub mod upload;

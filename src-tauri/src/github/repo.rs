@@ -146,7 +146,7 @@ pub fn get_authenticated_user(token: &str) -> Result<String, GitHubError> {
     struct User {
         login: String,
     }
-    let u: User = GitHubClient::get_json(&format!("{GITHUB_API_BASE}/user"), token)?;
+    let u: User = GitHubClient::get_json(token, &format!("{GITHUB_API_BASE}/user"))?;
     Ok(u.login)
 }
 
@@ -173,7 +173,13 @@ pub fn create_repo(token: &str, repo_name: &str) -> Result<RepoMetadata, GitHubE
         name: repo_name,
         description: DEFAULT_REPO_DESCRIPTION,
         private: true,
-        auto_init: false, // we'll create the first commit ourselves via Git Data API
+        // ponytail: must be `true` here. GitHub's blob API returns
+        // `409 Git Repository is empty` against a repo with no commits
+        // and no branch, so `auto_init:false` would deadlock the upload
+        // path on first use. Seeding a README + default branch lets us
+        // commit on top as a normal parent (upload_files already handles
+        // `head = Some(...)` and PATCHes the existing ref).
+        auto_init: true,
     };
     let url = format!("{GITHUB_API_BASE}/user/repos");
     GitHubClient::post_json(token, &url, &req)
@@ -201,16 +207,46 @@ pub fn get_branch_head(
     repo: &str,
     default_branch: &str,
 ) -> Result<Option<String>, GitHubError> {
+    // We only need `sha`. The shared `RefObject` requires a `type` field
+    // that the `branches/{branch}` endpoint doesn't include in `commit`,
+    // so a local struct with `#[serde(default)]` for everything else keeps
+    // us tolerant of GitHub adding fields.
     #[derive(Deserialize)]
-    struct Branch {
-        commit: RefObject,
+    struct BranchHead {
+        #[serde(default)]
+        commit: Option<CommitHead>,
+    }
+    #[derive(Deserialize)]
+    struct CommitHead {
+        sha: String,
     }
     let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{default_branch}");
-    match GitHubClient::get_json::<Branch>(token, &url) {
-        Ok(b) => Ok(Some(b.commit.sha)),
+    match GitHubClient::get_json::<BranchHead>(token, &url) {
+        Ok(b) => Ok(b.commit.map(|c| c.sha)),
         Err(GitHubError::Http { status: 404, .. }) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// Fetch a commit's tree SHA. Used as `base_tree` when building the next
+/// commit so we only send changed blobs and inherit everything else.
+pub fn get_commit_tree_sha(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    commit_sha: &str,
+) -> Result<String, GitHubError> {
+    #[derive(Deserialize)]
+    struct TreeRef {
+        sha: String,
+    }
+    #[derive(Deserialize)]
+    struct Commit {
+        tree: TreeRef,
+    }
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/git/commits/{commit_sha}");
+    let c: Commit = GitHubClient::get_json(token, &url)?;
+    Ok(c.tree.sha)
 }
 
 /// Fetch a blob by SHA, returning decoded bytes. Supports up to 100MB.
@@ -341,4 +377,58 @@ pub fn tree_to_remote_sessions(tree: &Tree, slug_for: impl Fn(&str) -> Option<St
 /// Encode JSON content as base64 for storage in blob API requests.
 pub fn encode_blob_content(content: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `GET /repos/.../branches/{branch}` returns a 4KB+
+    /// payload whose inner `commit` object has `sha` but no `type` field
+    /// at that level (only the *git object's* `type` exists, nested under
+    /// `commit.commit.tree`). The previous `RefObject`-based struct
+    /// required `type` and blew up with a JSON parse error.
+    #[test]
+    fn branch_head_payload_with_no_commit_type_parses() {
+        let payload = r#"
+        {
+            "name": "main",
+            "commit": {
+                "sha": "abcdef1234567890abcdef1234567890abcdef12",
+                "node_id": "C_abc",
+                "commit": {
+                    "tree": {"sha": "t", "url": "u"},
+                    "author": null,
+                    "committer": null,
+                    "message": "init"
+                },
+                "url": "https://api.github.com/repos/o/r/commits/abcdef",
+                "html_url": "https://github.com/o/r/commit/abcdef",
+                "comments_url": "https://api.github.com/repos/o/r/commits/abcdef/comments",
+                "author": null,
+                "committer": null,
+                "parents": []
+            },
+            "_links": {"self": "x", "html": "y"},
+            "protected": false,
+            "protection": {"enabled": false, "required_status_checks": null},
+            "protection_url": "https://api.github.com/repos/o/r/branches/main/protection"
+        }
+        "#;
+
+        #[derive(serde::Deserialize)]
+        struct CommitHead {
+            sha: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct BranchHead {
+            #[serde(default)]
+            commit: Option<CommitHead>,
+        }
+        let b: BranchHead = serde_json::from_str(payload).expect("must parse");
+        assert_eq!(
+            b.commit.unwrap().sha,
+            "abcdef1234567890abcdef1234567890abcdef12"
+        );
+    }
 }
