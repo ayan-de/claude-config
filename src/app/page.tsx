@@ -13,6 +13,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { Main } from "@/components/Main";
 import { TitleBar } from "@/components/TitleBar";
 import { DangerousModeConfirm } from "@/components/DangerousModeConfirm";
+import { GitHubTopBarButton } from "@/components/GitHubTopBarButton";
+import { useGitHubSync } from "@/hooks/useGitHubSync";
 
 import { GLOBAL_TABS } from "@/data/globalTabs";
 import { version as appVersion } from "../../package.json";
@@ -23,6 +25,7 @@ export default function Page() {
   const panel = useGlobalPanel();
   const updater = useUpdater();
   const dangerous = useDangerousMode();
+  const github = useGitHubSync();
 
   if (!providers.mounted) {
     return (
@@ -87,6 +90,16 @@ export default function Page() {
         }
         actions={
           <div className="flex items-center gap-2 pr-2">
+            <GitHubTopBarButton
+              config={github.config}
+              loading={github.loading}
+              active={panel.activeTabId === "github-sync"}
+              onClick={() =>
+                panel.activeTabId === "github-sync"
+                  ? panel.close()
+                  : panel.openTab("github-sync")
+              }
+            />
             <button
               type="button"
               onClick={() =>

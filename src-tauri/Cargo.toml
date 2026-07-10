@@ -32,6 +32,7 @@ tempfile = "3"
 fs2 = "0.4"
 dirs = "6"
 url = "2"
+base64 = "0.22"
 
 # HTTP client for the Tracker module. Uses the blocking client because
 # fetch_usage runs inside spawn_blocking (see refresh_tracker_cmd).

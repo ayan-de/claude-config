@@ -5,6 +5,7 @@ use tauri::Manager;
 use uuid::Uuid;
 
 mod commands;
+mod github;
 mod merge;
 mod models;
 mod state;
@@ -97,6 +98,17 @@ pub fn run() {
             commands::tracker::refresh_tracker_cmd,
             commands::tracker::get_tracker_usage_cmd,
             commands::tracker::list_tracker_usage_cmd,
+            commands::github_sync::get_github_sync_config_cmd,
+            commands::github_sync::github_start_device_flow_cmd,
+            commands::github_sync::github_poll_device_flow_cmd,
+            commands::github_sync::github_disconnect_cmd,
+            commands::github_sync::github_set_privacy_consent_cmd,
+            commands::github_sync::github_set_repo_name_cmd,
+            commands::github_sync::github_open_verification_url_cmd,
+            commands::github_sync::github_get_path_mappings_cmd,
+            commands::github_sync::github_set_path_mapping_cmd,
+            commands::github_sync::github_remove_path_mapping_cmd,
+            commands::github_sync::github_check_repo_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,11 +3,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  GitHubDeviceFlowStart,
+  GitHubPollOutcome,
+  GitHubSyncConfig,
   KeyringStatus,
   MarketplaceSummary,
   McpServerSummary,
+  ProjectPathMapping,
   Provider,
   ProviderInput,
+  RepoProbeResult,
   SessionMessage,
   SessionSummary,
   SkillSummary,
@@ -195,3 +200,43 @@ export const getTrackerUsage = (providerId: string) =>
  */
 export const listTrackerUsage = () =>
   call<Record<string, TrackerUsage>>("list_tracker_usage_cmd");
+
+// ---------- github sync (Phase 1: OAuth + connection) ----------
+
+export const getGithubSyncConfig = () =>
+  call<GitHubSyncConfig>("get_github_sync_config_cmd");
+
+export const githubStartDeviceFlow = () =>
+  call<GitHubDeviceFlowStart>("github_start_device_flow_cmd");
+
+export const githubPollDeviceFlow = (deviceCode: string) =>
+  call<GitHubPollOutcome>("github_poll_device_flow_cmd", { deviceCode });
+
+export const githubOpenVerificationUrl = (verificationUri: string) =>
+  call<void>("github_open_verification_url_cmd", { verificationUri });
+
+export const githubDisconnect = () =>
+  call<void>("github_disconnect_cmd");
+
+export const githubSetPrivacyConsent = (given: boolean) =>
+  call<void>("github_set_privacy_consent_cmd", { given });
+
+export const githubSetRepoName = (repoName: string) =>
+  call<void>("github_set_repo_name_cmd", { repoName });
+
+export const githubGetPathMappings = () =>
+  call<ProjectPathMapping[]>("github_get_path_mappings_cmd");
+
+export const githubSetPathMapping = (originalPath: string, localPath: string) =>
+  call<void>("github_set_path_mapping_cmd", { originalPath, localPath });
+
+export const githubRemovePathMapping = (originalPath: string) =>
+  call<void>("github_remove_path_mapping_cmd", { originalPath });
+
+/**
+ * Probe whether the configured session-sync repo exists on the user's
+ * GitHub account. Used during Phase 2 upload setup; exposed here so the
+ * settings UI can also show "Repo: connected / not found".
+ */
+export const githubCheckRepo = () =>
+  call<RepoProbeResult | null>("github_check_repo_cmd");

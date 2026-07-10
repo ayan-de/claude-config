@@ -601,6 +601,7 @@ dependencies = [
 name = "claude-config"
 version = "0.6.1"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "fs2",

@@ -360,3 +360,60 @@ export interface SessionMessage {
   tool_name: string | null;
   is_tool_result: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// GitHub session sync
+// ---------------------------------------------------------------------------
+
+/** Connection metadata stored at <app_data>/github_sync.json. */
+export interface GitHubSyncConfig {
+  schemaVersion: number;
+  isConnected: boolean;
+  username?: string | null;
+  /** User's GitHub avatar URL — captured once on auth, shown in the
+   *  top bar so users can see at a glance that they're connected. */
+  avatarUrl?: string | null;
+  /** Default: "claude-sessions". User-editable in settings. */
+  repoName: string;
+  /** RFC 3339 timestamp of the last successful upload/download. */
+  lastSync?: string | null;
+  /** Set once after first upload — user accepted the privacy warning. */
+  privacyConsentGiven: boolean;
+}
+
+/** Initial response from `github_start_device_flow_cmd`. */
+export interface GitHubDeviceFlowStart {
+  /** Backend polls with this; never shown to the user. */
+  deviceCode: string;
+  /** Short code the user types into the GitHub verification page. */
+  userCode: string;
+  /** URL the user opens in their browser to enter `userCode`. */
+  verificationUri: string;
+  /** Seconds until the device code expires (GitHub gives 900). */
+  expiresIn: number;
+  /** Seconds to wait between polls (GitHub starts at 5). */
+  interval: number;
+}
+
+/**
+ * Discriminated outcome of one `github_poll_device_flow_cmd` call.
+ * Mirrors `GitHubPollOutcome` in `src-tauri/src/commands/github_sync.rs`.
+ */
+export type GitHubPollOutcome =
+  | { status: "pending" }
+  | { status: "slow_down" }
+  | { status: "denied" }
+  | { status: "expired" }
+  | { status: "authorized"; username: string; avatarUrl: string | null };
+
+/** One entry in the per-project path-mapping table. */
+export interface ProjectPathMapping {
+  originalPath: string;
+  localPath: string;
+}
+
+/** Result of `github_check_repo_cmd` — used to validate Phase 2 setup. */
+export interface RepoProbeResult {
+  fullName: string;
+  defaultBranch: string;
+}

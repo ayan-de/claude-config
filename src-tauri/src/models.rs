@@ -330,6 +330,15 @@ pub enum AppError {
     #[error("Failed to acquire lock on settings file")]
     Lock(String),
 
+    #[error("GitHub API error ({status}): {message}")]
+    GitHub { status: u16, message: String },
+
+    #[error("GitHub authentication required")]
+    GitHubAuthRequired,
+
+    #[error("GitHub sync not configured: {0}")]
+    GitHubNotConfigured(String),
+
     #[error("Internal: {0}")]
     Internal(String),
 }
@@ -347,6 +356,9 @@ impl AppError {
             AppError::MalformedSettings { .. } => "malformed_settings",
             AppError::MalformedClaudeMd { .. } => "malformed_claude_md",
             AppError::Lock(_) => "lock",
+            AppError::GitHub { .. } => "github_api",
+            AppError::GitHubAuthRequired => "github_auth_required",
+            AppError::GitHubNotConfigured(_) => "github_not_configured",
             AppError::Internal(_) => "internal",
         }
     }
@@ -364,6 +376,129 @@ impl serde::Serialize for AppError {
 }
 
 pub type AppResult<T> = std::result::Result<T, AppError>;
+
+// ===================================================================
+// GitHub session sync
+// ===================================================================
+
+/// Account name used in the OS keyring for the GitHub access token.
+/// Stored under (KEYRING_SERVICE, GITHUB_KEYRING_ACCOUNT).
+pub const GITHUB_KEYRING_ACCOUNT: &str = "github_sync";
+
+/// Default repo name for session storage. User-configurable in settings.
+pub const DEFAULT_GITHUB_REPO: &str = "claude-sessions";
+
+/// GitHub OAuth device-flow start response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubDeviceFlowStart {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// GitHub OAuth access token (the only secret we keep). Stored in OS
+/// keyring as a JSON-serialized `GitHubAuthSecret`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubAuthSecret {
+    pub access_token: String,
+    pub username: Option<String>,
+    pub created_at: String,
+}
+
+/// Non-secret metadata for GitHub sync. Stored at
+/// `<app_data_dir>/github_sync.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubSyncConfig {
+    pub schema_version: u32,
+    pub is_connected: bool,
+    pub username: Option<String>,
+    /// User's GitHub avatar URL — captured once on auth, shown in the
+    /// top bar so users can see at a glance that they're connected.
+    pub avatar_url: Option<String>,
+    pub repo_name: String,
+    pub last_sync: Option<String>,
+    /// Set once after first upload — confirms user accepted the
+    /// "this transcript may contain sensitive content" prompt.
+    pub privacy_consent_given: bool,
+}
+
+impl Default for GitHubSyncConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            is_connected: false,
+            username: None,
+            avatar_url: None,
+            repo_name: DEFAULT_GITHUB_REPO.to_string(),
+            last_sync: None,
+            privacy_consent_given: false,
+        }
+    }
+}
+
+/// Remote session summary returned to the UI when listing the GitHub
+/// repo's contents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSessionSummary {
+    pub session_id: String,
+    pub project_slug: String,
+    pub original_path: String,
+    pub title: Option<String>,
+    pub modified: Option<String>,
+    pub message_count: u32,
+    pub sha: String,
+}
+
+/// Maps an original project path (where the session was created) to a
+/// local path on this machine. Persisted in `<app_data_dir>/project_path_mappings.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPathMapping {
+    pub original_path: String,
+    pub local_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPathMappings {
+    pub version: u32,
+    pub mappings: std::collections::HashMap<String, String>,
+}
+
+/// Per-project sync state. One file lives at
+/// `<project_folder>/session_sync_state.json` (next to sessions-index.json).
+/// Records the last-uploaded timestamp, remote blob SHA, and the file
+/// mtime we captured at upload — enough to detect "local changed since
+/// upload" without scanning the whole `.jsonl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSyncMetadata {
+    pub last_uploaded: Option<String>,
+    pub remote_sha: Option<String>,
+    pub last_local_modified: Option<String>,
+    pub sync_state: SyncState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    NeverUploaded,
+    Synced,
+    OutOfSync,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSyncStateFile {
+    pub version: u32,
+    pub sessions: std::collections::HashMap<String, SessionSyncMetadata>,
+}
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  Cloud,
   FileText,
   History,
   PlugZap,
@@ -15,6 +16,10 @@ import {
   ClaudeMdEditor,
   ClaudeMdSidebarButton,
 } from "@/components/ClaudeMdEditor";
+import {
+  GitHubSyncPanel,
+  GitHubSyncSidebarButton,
+} from "@/components/GitHubSync";
 import {
   MarketplaceSidebarButton,
   MarketplaceView,
@@ -127,6 +132,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "See the latest cached usage snapshot across every provider with a configured tracker.",
     SidebarButton: UsageSidebarButton,
     Component: UsageView,
+  },
+  {
+    id: "github-sync",
+    label: "GitHub Sync",
+    icon: Cloud,
+    tooltip:
+      "Back up and restore Claude Code sessions to a private GitHub repo. Sign in with device flow, pick a repo, upload or download.",
+    SidebarButton: GitHubSyncSidebarButton,
+    Component: GitHubSyncPanel,
   },
 ];
 

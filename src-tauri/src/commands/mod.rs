@@ -1,3 +1,4 @@
+pub mod github_sync;
 pub mod providers;
 pub mod settings;
 pub mod subscription;

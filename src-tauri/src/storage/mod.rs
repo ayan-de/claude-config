@@ -1,5 +1,6 @@
 pub mod claude_md;
 pub mod credentials;
+pub mod github_sync;
 pub mod keyring;
 pub mod marketplaces;
 pub mod mcp;
