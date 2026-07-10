@@ -464,8 +464,6 @@ function SessionRow({ session, onSelect }: RowProps) {
             {session.title}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-            <span className="font-mono tabular-nums">{session.session_id.slice(0, 8)}</span>
-            <span className="text-muted-foreground/50">·</span>
             <span>
               {session.message_count > 0
                 ? `${session.message_count} msg${session.message_count === 1 ? "" : "s"}`
