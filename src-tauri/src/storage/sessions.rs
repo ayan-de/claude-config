@@ -234,8 +234,10 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
     let project_path = read_cwd_from_transcript(path)
         .or_else(|| project_folder_slug.as_deref().and_then(decode_project_slug));
     let session_id = file_stem(path);
+    let title = extract_title_from_jsonl(path)
+        .unwrap_or_else(|| format!("(unindexed) {}", session_id));
     Some(SessionSummary {
-        title: format!("(unindexed) {}", session_id),
+        title,
         session_id,
         message_count: 0,
         modified,
@@ -1146,5 +1148,38 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].session_id, session_id);
         assert_eq!(out[0].title, "Jsonl Wins");
+    }
+
+    #[test]
+    fn unindexed_session_uses_jsonl_title_not_placeholder() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A transcript under projects/... with NO sessions-index.json
+        // nearby. The scanner will fall through to summary_from_jsonl_stat.
+        write(
+            tmp.path(),
+            "projects/-home-test/abcdef.jsonl",
+            "{\"type\":\"custom-title\",\"customTitle\":\"Unindexed but titled\"}\n",
+        );
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].session_id, "abcdef");
+        assert_eq!(out[0].title, "Unindexed but titled");
+    }
+
+    #[test]
+    fn unindexed_session_falls_back_to_placeholder_when_no_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "projects/-home-test/no-title-here.jsonl",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        );
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].title,
+            "(unindexed) no-title-here",
+            "untitled unindexed sessions should keep the uuid placeholder"
+        );
     }
 }
