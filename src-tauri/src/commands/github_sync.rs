@@ -6,13 +6,13 @@
 //!   - Read/clear project-path mappings
 //!   - Privacy-consent flag (set once before first upload)
 //!
-//! Phase 2 will add upload (repo creation + Git Data API plumbing).
-//! Phase 3 will add list-remote + download. Those commands are
-//! stubbed-but-absent here on purpose — adding them now would mean
-//! running a Rust-only half-feature that the UI can't yet call.
+//! Phase 2 adds upload (repo creation + Git Data API plumbing) plus the
+//! two sync-state read commands the sessions list uses to color each
+//! row's GitHub icon. Phase 3 will add list-remote + download.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
@@ -21,12 +21,18 @@ use crate::github::device_flow::{
     poll_device_flow as poll_df, start_device_flow as start_df, DeviceFlowOutcome,
 };
 use crate::github::repo as gh_repo;
+use crate::github::upload as gh_upload;
 use crate::models::{
     AppError, AppResult, GITHUB_KEYRING_ACCOUNT, GitHubAuthSecret, GitHubDeviceFlowStart,
-    GitHubSyncConfig, ProjectPathMapping, ProjectPathMappings, ProviderSecret,
+    GitHubSyncConfig, ProjectPathMapping, ProjectPathMappings, ProjectRemoteMetadata,
+    ProviderSecret, RemoteSessionEntry, SessionSyncMetadata, SessionSyncStateFile, SyncState,
 };
 use crate::state::AppState;
 use crate::storage::github_sync as storage;
+
+/// Largest session we'll upload. GitHub's hard blob limit is 100 MB;
+/// base64 inflates payloads ~33%, so we cap the raw file well under it.
+const MAX_UPLOAD_BYTES: u64 = 95 * 1024 * 1024;
 
 fn map_gh(e: GitHubError) -> AppError {
     match e {
@@ -243,6 +249,220 @@ pub fn github_remove_path_mapping_cmd(
 }
 
 // ===================================================================
+// Upload (Phase 2)
+// ===================================================================
+
+/// The project slug is the on-disk folder name that Claude Code created
+/// (`<claude_dir>/projects/<slug>/<uuid>.jsonl`). We read it straight from
+/// the transcript's parent directory rather than re-encoding `project_path`
+/// — the encoding is lossy/ambiguous (e.g. `.claude` -> `--claude`), so the
+/// authoritative slug is the one already on disk.
+fn slug_from_full_path(full_path: &Path) -> AppResult<String> {
+    full_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            AppError::Validation(format!(
+                "cannot derive project slug from path: {}",
+                full_path.display()
+            ))
+        })
+}
+
+/// File mtime as an RFC3339 string, matching the format stored by the
+/// sessions scanner so `classify_sync_state`'s comparison lines up.
+fn mtime_rfc3339(meta: &std::fs::Metadata) -> Option<String> {
+    let modified = meta.modified().ok()?;
+    let dur = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    DateTime::<Utc>::from_timestamp(dur.as_secs() as i64, 0)
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// Merge this session into the per-project `metadata.json` living in the
+/// repo, returning the serialized bytes to commit. Fetches the existing
+/// file (if any) so we preserve other sessions' entries and don't clobber
+/// `original_path`.
+fn build_project_metadata(
+    token: &str,
+    owner: &str,
+    repo_name: &str,
+    default_branch: &str,
+    slug: &str,
+    session_id: &str,
+    project_path: &str,
+    modified: Option<String>,
+) -> AppResult<Vec<u8>> {
+    let meta_path = storage::project_metadata_path(slug);
+    let existing =
+        gh_upload::fetch_existing_file(token, owner, repo_name, default_branch, &meta_path)
+            .map_err(map_gh)?;
+
+    let mut meta: ProjectRemoteMetadata = match existing {
+        Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        None => ProjectRemoteMetadata::default(),
+    };
+    meta.version = 1;
+    if meta.original_path.is_empty() {
+        meta.original_path = project_path.to_string();
+    }
+    meta.sessions.insert(
+        session_id.to_string(),
+        RemoteSessionEntry {
+            title: None,
+            modified,
+            message_count: 0,
+        },
+    );
+    Ok(serde_json::to_vec_pretty(&meta)?)
+}
+
+/// Upload a single session transcript (plus refreshed per-project metadata)
+/// to the private sync repo in one atomic commit. Returns the resulting
+/// sync metadata so the frontend can color the row without a refetch.
+#[tauri::command]
+pub fn github_upload_session_cmd(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    full_path: String,
+    project_path: String,
+) -> AppResult<SessionSyncMetadata> {
+    let full_path = PathBuf::from(&full_path);
+    let cfg_path = sync_config_path(&state);
+    let mut cfg = storage::load_github_sync_config(&cfg_path)?;
+
+    // Privacy gate: the frontend shows the consent dialog, calls
+    // `github_set_privacy_consent_cmd`, then retries. Until then we refuse
+    // to push a transcript that may hold secrets.
+    if !cfg.privacy_consent_given {
+        return Err(AppError::GitHubNotConfigured("privacy_consent_required".into()));
+    }
+
+    // Large-file guard before we read anything into memory.
+    let meta = std::fs::metadata(&full_path)?;
+    if meta.len() > MAX_UPLOAD_BYTES {
+        return Err(AppError::Validation(format!(
+            "session is {} MB; GitHub sync caps at {} MB",
+            meta.len() / (1024 * 1024),
+            MAX_UPLOAD_BYTES / (1024 * 1024)
+        )));
+    }
+    let modified = mtime_rfc3339(&meta);
+    let content = std::fs::read(&full_path)?;
+
+    let slug = slug_from_full_path(&full_path)?;
+    let secret = load_github_token(&state)?;
+    let token = &secret.access_token;
+    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+
+    // Ensure the repo exists first so metadata's fetch-existing sees the
+    // right default branch.
+    let default_branch = gh_upload::ensure_repo(token, &owner, &cfg.repo_name).map_err(map_gh)?;
+
+    let session_repo_path = storage::remote_session_path(&slug, &session_id);
+    let metadata_bytes = build_project_metadata(
+        token,
+        &owner,
+        &cfg.repo_name,
+        &default_branch,
+        &slug,
+        &session_id,
+        &project_path,
+        modified.clone(),
+    )?;
+
+    let files = vec![
+        gh_upload::UploadFile {
+            path: session_repo_path.clone(),
+            content,
+        },
+        gh_upload::UploadFile {
+            path: storage::project_metadata_path(&slug),
+            content: metadata_bytes,
+        },
+    ];
+
+    let message = format!("sync: {} ({})", session_id, slug);
+    let result =
+        gh_upload::upload_files(token, &owner, &cfg.repo_name, &message, &files).map_err(map_gh)?;
+
+    let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let remote_sha = result.blob_shas.get(&session_repo_path).cloned();
+
+    let sync_meta = SessionSyncMetadata {
+        last_uploaded: Some(now.clone()),
+        remote_sha,
+        last_local_modified: modified,
+        sync_state: SyncState::Synced,
+    };
+
+    // Persist to the project's session_sync_state.json (locked write —
+    // Claude Code may be writing to the same folder).
+    let project_folder = full_path.parent().ok_or_else(|| {
+        AppError::Validation(format!(
+            "transcript path has no parent folder: {}",
+            full_path.display()
+        ))
+    })?;
+    let state_path = storage::session_sync_state_path(project_folder);
+    let mut state_file = storage::load_session_sync_state(&state_path)?;
+    state_file.version = 1;
+    state_file
+        .sessions
+        .insert(session_id.clone(), sync_meta.clone());
+    storage::write_session_sync_state_atomic(&state_path, &state_file)?;
+
+    // Record the last successful sync on the global config.
+    cfg.last_sync = Some(now);
+    storage::save_github_sync_config(&cfg_path, &cfg)?;
+
+    Ok(sync_meta)
+}
+
+/// Return the full per-project sync-state map. `project_folder` is the
+/// on-disk directory that holds the transcripts (parent of the `.jsonl`).
+/// The sessions list calls this once per project to color every row.
+#[tauri::command]
+pub fn github_get_session_sync_state_cmd(
+    _state: tauri::State<'_, AppState>,
+    project_folder: String,
+) -> AppResult<SessionSyncStateFile> {
+    let path = storage::session_sync_state_path(Path::new(&project_folder));
+    storage::load_session_sync_state(&path)
+}
+
+/// Re-classify a single session by comparing its current on-disk mtime
+/// against the last-uploaded snapshot. Used after an edit to flip a row
+/// from green (synced) to amber (out-of-sync) without a full rescan.
+#[tauri::command]
+pub fn github_check_session_sync_status_cmd(
+    _state: tauri::State<'_, AppState>,
+    session_id: String,
+    full_path: String,
+) -> AppResult<SyncState> {
+    let full_path = PathBuf::from(&full_path);
+    let project_folder = full_path.parent().ok_or_else(|| {
+        AppError::Validation(format!(
+            "transcript path has no parent folder: {}",
+            full_path.display()
+        ))
+    })?;
+    let path = storage::session_sync_state_path(project_folder);
+    let state_file = storage::load_session_sync_state(&path)?;
+    let entry = state_file.sessions.get(&session_id);
+
+    let current_mtime = std::fs::metadata(&full_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    Ok(storage::classify_sync_state(entry, current_mtime))
+}
+
+// ===================================================================
 // Probe (used in Phase 2 setup; included now to validate the wiring)
 // ===================================================================
 
@@ -302,3 +522,38 @@ fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
 // Keep this trait-bound reference so the type is referenced.
 #[allow(dead_code)]
 fn _types_used(_: ProjectPathMappings, _: GitHubSyncConfig) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_is_the_on_disk_parent_folder_name() {
+        // The slug is read verbatim from the transcript's parent dir, so
+        // even the lossy/ambiguous encodings (`.claude` -> `--claude`)
+        // round-trip perfectly — we never re-derive them.
+        let p = PathBuf::from(
+            "/home/ayande/.claude/projects/-home-ayande--claude/abc-uuid.jsonl",
+        );
+        assert_eq!(slug_from_full_path(&p).unwrap(), "-home-ayande--claude");
+    }
+
+    #[test]
+    fn slug_handles_underscores_and_dashes_in_path() {
+        let p = PathBuf::from(
+            "/x/projects/-home-ayan_de-Projects-my-project/s.jsonl",
+        );
+        assert_eq!(
+            slug_from_full_path(&p).unwrap(),
+            "-home-ayan_de-Projects-my-project"
+        );
+    }
+
+    #[test]
+    fn slug_errors_when_no_parent() {
+        let p = PathBuf::from("s.jsonl");
+        // No parent directory component -> validation error rather than a
+        // silently-wrong empty slug.
+        assert!(slug_from_full_path(&p).is_err());
+    }
+}

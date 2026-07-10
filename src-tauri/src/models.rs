@@ -500,6 +500,28 @@ pub struct SessionSyncStateFile {
     pub sessions: std::collections::HashMap<String, SessionSyncMetadata>,
 }
 
+/// Per-project metadata stored in the repo at
+/// `sessions/<slug>/metadata.json`. Its whole reason for existing is
+/// `original_path`: the slug is lossy (see the module docs on encoding),
+/// so the decoded project path must be carried explicitly for Phase 3
+/// path remapping on download. The per-session map is a tiny index the
+/// browse-remote UI reads without downloading every transcript.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRemoteMetadata {
+    pub version: u32,
+    pub original_path: String,
+    pub sessions: std::collections::HashMap<String, RemoteSessionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSessionEntry {
+    pub title: Option<String>,
+    pub modified: Option<String>,
+    pub message_count: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

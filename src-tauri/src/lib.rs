@@ -109,6 +109,9 @@ pub fn run() {
             commands::github_sync::github_set_path_mapping_cmd,
             commands::github_sync::github_remove_path_mapping_cmd,
             commands::github_sync::github_check_repo_cmd,
+            commands::github_sync::github_upload_session_cmd,
+            commands::github_sync::github_get_session_sync_state_cmd,
+            commands::github_sync::github_check_session_sync_status_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
