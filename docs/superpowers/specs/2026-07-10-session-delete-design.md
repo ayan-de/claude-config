@@ -109,6 +109,9 @@ Copy:
      try {
        await deleteSession(deleteTarget.full_path);
        await refresh();
+       // Re-seed the upload state map so the deleted session drops out.
+       // (Done implicitly because useSessions.refresh() updates the
+       // `sessions` array, which useSessionUpload derives from via seed().)
        if (selected?.session_id === deleteTarget.session_id) setSelected(null);
        toast.success("Session deleted");
        setDeleteTarget(null);
@@ -132,7 +135,7 @@ Copy:
    />
    ```
 
-5. The `useSessionUpload` hook should clear its in-memory state for the deleted session. The hook's existing `refresh` (re-derives `stateById` from current `sessions`) handles this naturally because `refresh()` re-pulls from the backend.
+5. The `useSessionUpload` hook should clear its in-memory state for the deleted session. The hook exposes `seed(sessions)` which re-derives `stateById` from the current list. After `refresh()` from `useSessions` returns the new (smaller) list, call `seed(newSessions)` to drop the deleted session from the upload state map. No special API on the upload hook — it's already designed for this.
 
 No changes to:
 - `src/lib/types.ts` (uses existing `SessionSummary`).
