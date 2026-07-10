@@ -15,7 +15,10 @@ import type {
   RepoProbeResult,
   SessionMessage,
   SessionSummary,
+  SessionSyncMetadata,
+  SessionSyncStateFile,
   SkillSummary,
+  SyncState,
   TrackerConfigView,
   TrackerSourceDescriptor,
   TrackerUsage,
@@ -26,15 +29,31 @@ interface RawError {
   message?: string;
 }
 
+/**
+ * Error carrying the backend's `kind` discriminant (see `AppError` in
+ * `models.rs`, serialized as `{kind, message}`). Callers that want to
+ * branch on a specific failure — e.g. `github_auth_required` vs
+ * `github_not_configured` — read `.kind`; everyone else just uses
+ * `.message` as before.
+ */
+export class AppError extends Error {
+  readonly kind?: string;
+  constructor(message: string, kind?: string) {
+    super(message);
+    this.name = "AppError";
+    this.kind = kind;
+  }
+}
+
 function normalizeError(e: unknown): Error {
   if (typeof e === "object" && e !== null) {
     const r = e as RawError;
     if (typeof r.message === "string") {
-      return new Error(r.message);
+      return new AppError(r.message, r.kind);
     }
   }
-  if (typeof e === "string") return new Error(e);
-  return new Error("Unknown error");
+  if (typeof e === "string") return new AppError(e);
+  return new AppError("Unknown error");
 }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -240,3 +259,38 @@ export const githubRemovePathMapping = (originalPath: string) =>
  */
 export const githubCheckRepo = () =>
   call<RepoProbeResult | null>("github_check_repo_cmd");
+
+// ---------- github sync (Phase 2: upload) ----------
+
+/**
+ * Upload one transcript (+ per-project metadata) to the private sync repo
+ * in a single commit. Returns the fresh sync metadata so the caller can
+ * recolor the row without a refetch. Rejects with `github_not_configured`
+ * (`privacy_consent_required`) until the consent flag is set.
+ */
+export const githubUploadSession = (
+  sessionId: string,
+  fullPath: string,
+  projectPath: string,
+) =>
+  call<SessionSyncMetadata>("github_upload_session_cmd", {
+    sessionId,
+    fullPath,
+    projectPath,
+  });
+
+/** Full per-project sync-state map (parent folder of the transcripts). */
+export const githubGetSessionSyncState = (projectFolder: string) =>
+  call<SessionSyncStateFile>("github_get_session_sync_state_cmd", {
+    projectFolder,
+  });
+
+/** Re-classify one session against its current on-disk mtime. */
+export const githubCheckSessionSyncStatus = (
+  sessionId: string,
+  fullPath: string,
+) =>
+  call<SyncState>("github_check_session_sync_status_cmd", {
+    sessionId,
+    fullPath,
+  });

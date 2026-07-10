@@ -417,3 +417,23 @@ export interface RepoProbeResult {
   fullName: string;
   defaultBranch: string;
 }
+
+/**
+ * Per-session sync status. Drives the color of the GitHub icon on each
+ * session row. Mirrors the `SyncState` enum in `models.rs` (snake_case).
+ */
+export type SyncState = "never_uploaded" | "synced" | "out_of_sync";
+
+/** One session's sync bookkeeping, returned by `github_upload_session_cmd`. */
+export interface SessionSyncMetadata {
+  lastUploaded?: string | null;
+  remoteSha?: string | null;
+  lastLocalModified?: string | null;
+  syncState: SyncState;
+}
+
+/** The per-project `session_sync_state.json`, keyed by session id. */
+export interface SessionSyncStateFile {
+  version: number;
+  sessions: Record<string, SessionSyncMetadata>;
+}
