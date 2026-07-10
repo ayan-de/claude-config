@@ -26,14 +26,16 @@ export function useSessions() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<SessionSummary[]> => {
     try {
       const list = await listSessions();
       setSessions(list);
+      return list;
     } catch {
       // Surfaces empty in the UI; non-fatal — listSessions errors are
       // almost always "no ~/.claude/projects dir yet".
       setSessions([]);
+      return [];
     } finally {
       setLoading(false);
     }
