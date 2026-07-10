@@ -185,9 +185,16 @@ fn merge_index_into(
         if !seen.insert(entry.session_id.clone()) {
             continue;
         }
+        let title_from_jsonl = if entry.full_path.is_empty() {
+            None
+        } else {
+            extract_title_from_jsonl(Path::new(&entry.full_path))
+        };
+        let title = title_from_jsonl
+            .unwrap_or_else(|| pick_title(entry.summary.as_deref(), entry.first_prompt.as_deref()));
         out.push(SessionSummary {
             session_id: entry.session_id,
-            title: pick_title(entry.summary.as_deref(), entry.first_prompt.as_deref()),
+            title,
             message_count: entry.message_count.unwrap_or(0),
             modified: entry.modified.or(entry.created),
             project_name: entry
@@ -336,6 +343,120 @@ fn truncate_chars(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// Reads the first and last 64KB of a transcript and returns the
+/// user-set or auto-generated title. Type-first priority: the user's
+/// rename always wins over the AI title, even when the rename has
+/// been pushed out of the tail 64KB window by later activity.
+///
+/// Priority: customTitle (tail) → customTitle (head) → aiTitle (tail)
+/// → aiTitle (head) → None.
+///
+/// `ponytail: head+tail 64KB windows. Differs from upstream /resume's
+/// bucket-first order (tail→head, types interleaved) by checking
+/// customTitle across both buffers before falling through to aiTitle.
+/// Fixes the silent-rename-loss case where a /rename gets tail-evicted
+/// and a later aiTitle is in the tail. Same I/O, strictly better.`
+pub fn extract_title_from_jsonl(path: &Path) -> Option<String> {
+    const WINDOW: u64 = 64 * 1024;
+    let head_bytes = read_head_bytes(path, WINDOW).ok()?;
+    let tail_bytes = read_tail_bytes(path, WINDOW).ok()?;
+    let head = std::str::from_utf8(&head_bytes).ok()?;
+    let tail = std::str::from_utf8(&tail_bytes).ok()?;
+    let title = extract_last_string_field(tail, "customTitle")
+        .or_else(|| extract_last_string_field(head, "customTitle"))
+        .or_else(|| extract_last_string_field(tail, "aiTitle"))
+        .or_else(|| extract_last_string_field(head, "aiTitle"));
+    title.map(|s| truncate_chars(&s, TITLE_MAX_CHARS))
+}
+
+/// Returns the first `max_bytes` of the file. Always line-aligned at
+/// the start: if the file is smaller than `max_bytes`, returns it
+/// whole; if a partial first line would result from a windowed read,
+/// the partial line is discarded. (The head read here is always from
+/// byte 0, so no skip is needed — but we keep the helper symmetric
+/// with [`read_tail_bytes`] for readability.)
+fn read_head_bytes(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut buf = vec![0u8; max_bytes as usize];
+    let n = file.read(&mut buf)?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
+/// Returns the last `max_bytes` of the file. When the read does not
+/// start at byte 0, the first (partial) line is dropped so callers
+/// see line-aligned data.
+fn read_tail_bytes(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut buf)?;
+    if start > 0 {
+        if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+            buf.drain(..=nl);
+        }
+    }
+    Ok(buf)
+}
+
+/// Finds the LAST `"<key>":"…"` or `"<key>": "…"` substring in `text`
+/// and returns the unescaped value. Returns `None` if no complete
+/// match exists in the buffer. Mirrors upstream
+/// `extractLastJsonStringField` in spirit (last-one-wins via
+/// left-to-right walk) but iterates by char so UTF-8 multibyte
+/// continuation bytes can never be mistaken for `\\` or `"`.
+fn extract_last_string_field(text: &str, key: &str) -> Option<String> {
+    let pat1 = format!("\"{}\":\"", key);
+    let pat2 = format!("\"{}\": \"", key);
+    let mut last: Option<String> = None;
+    for pat in [&pat1, &pat2] {
+        let mut from = 0usize;
+        while let Some(rel) = text[from..].find(pat.as_str()) {
+            let val_start = from + rel + pat.len();
+            // Walk chars to find the closing quote, skipping
+            // JSON-escaped chars (\\, \", \n, \uXXXX).
+            let mut chars = text[val_start..].char_indices().peekable();
+            let mut close_off: Option<usize> = None;
+            while let Some((off, c)) = chars.next() {
+                if c == '\\' {
+                    if chars.next().is_none() {
+                        break;
+                    }
+                    continue;
+                }
+                if c == '"' {
+                    close_off = Some(off);
+                    break;
+                }
+            }
+            match close_off {
+                Some(off) => {
+                    let raw = &text[val_start..val_start + off];
+                    last = Some(unescape_json_string(raw));
+                    from = val_start + off + '"'.len_utf8();
+                }
+                None => {
+                    // Truncated buffer; no complete value here.
+                    from = text.len();
+                    break;
+                }
+            }
+        }
+    }
+    last
+}
+
+/// Parses a JSON string literal body and returns the unescaped value.
+/// Falls back to the raw input on parse error (shouldn't happen for
+/// well-formed input — defensive only).
+fn unescape_json_string(raw: &str) -> String {
+    serde_json::from_str::<String>(&format!("\"{}\"", raw)).unwrap_or_else(|_| raw.to_string())
 }
 
 fn last_path_segment(p: &str) -> Option<String> {
@@ -870,5 +991,160 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(out[0].content.starts_with("[thinking]"));
         assert_eq!(out[1].content, "answer");
+    }
+
+    // ---- extract_title_from_jsonl ----
+
+    #[test]
+    fn title_from_jsonl_returns_custom_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n\
+             {\"type\":\"custom-title\",\"customTitle\":\"My Renamed Session\"}\n",
+        );
+        assert_eq!(
+            extract_title_from_jsonl(&path).as_deref(),
+            Some("My Renamed Session"),
+        );
+    }
+
+    #[test]
+    fn title_from_jsonl_returns_ai_title_when_no_custom_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n\
+             {\"type\":\"ai-title\",\"aiTitle\":\"Auto generated title\"}\n",
+        );
+        assert_eq!(
+            extract_title_from_jsonl(&path).as_deref(),
+            Some("Auto generated title"),
+        );
+    }
+
+    #[test]
+    fn title_from_jsonl_prefers_custom_over_ai() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"ai-title\",\"aiTitle\":\"Auto\"}\n\
+             {\"type\":\"custom-title\",\"customTitle\":\"Manual\"}\n",
+        );
+        assert_eq!(extract_title_from_jsonl(&path).as_deref(), Some("Manual"));
+    }
+
+    #[test]
+    fn title_from_jsonl_uses_last_custom_title_when_renamed_twice() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"custom-title\",\"customTitle\":\"First rename\"}\n\
+             {\"type\":\"custom-title\",\"customTitle\":\"Second rename\"}\n",
+        );
+        assert_eq!(
+            extract_title_from_jsonl(&path).as_deref(),
+            Some("Second rename"),
+        );
+    }
+
+    /// The bucket-order fix: customTitle is in the head 64KB only
+    /// (tail-evicted), aiTitle is in the tail. Type-first priority
+    /// must return the customTitle regardless of position.
+    #[test]
+    fn title_from_jsonl_prefers_head_custom_title_over_tail_ai_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Build a file large enough that head and tail don't overlap.
+        // 80KB of padding (between 64KB and 128KB) forces any 64KB
+        // window to see only one of the two entries.
+        let mut content = String::new();
+        content.push_str("{\"type\":\"custom-title\",\"customTitle\":\"User rename\"}\n");
+        // Pad to push the aiTitle past the head 64KB window.
+        let pad_lines = 80 * 1024 / 64; // 1280 lines of ~64 bytes
+        for i in 0..pad_lines {
+            content.push_str(&format!(
+                "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"message {} that is long enough to push the line past a boundary\"}}}}\n",
+                i
+            ));
+        }
+        content.push_str("{\"type\":\"ai-title\",\"aiTitle\":\"Auto title\"}\n");
+        let path = write_transcript(tmp.path(), "s.jsonl", &content);
+
+        // Sanity: file is > 64KB so the two windows don't fully overlap.
+        let len = fs::metadata(&path).unwrap().len();
+        assert!(len > 64 * 1024, "test fixture should exceed 64KB; got {} bytes", len);
+
+        assert_eq!(
+            extract_title_from_jsonl(&path).as_deref(),
+            Some("User rename"),
+        );
+    }
+
+    #[test]
+    fn title_from_jsonl_returns_none_when_no_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        );
+        assert_eq!(extract_title_from_jsonl(&path), None);
+    }
+
+    #[test]
+    fn title_from_jsonl_unescapes_quoted_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"custom-title\",\"customTitle\":\"He said \\\"hi\\\"\"}\n",
+        );
+        assert_eq!(
+            extract_title_from_jsonl(&path).as_deref(),
+            Some("He said \"hi\""),
+        );
+    }
+
+    #[test]
+    fn indexed_session_uses_jsonl_title_over_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Create the transcript first so we can reference its real path.
+        let session_id = "11111111-2222-3333-4444-555555555555";
+        let transcript = write_transcript(
+            tmp.path(),
+            &format!("{}.jsonl", session_id),
+            "{\"type\":\"custom-title\",\"customTitle\":\"Jsonl Wins\"}\n",
+        );
+        let full_path = transcript.display().to_string();
+
+        write(
+            tmp.path(),
+            "projects/-home-test/sessions-index.json",
+            &format!(
+                r#"{{
+                    "version": 1,
+                    "entries": [{{
+                        "sessionId": "{sid}",
+                        "fullPath": "{fp}",
+                        "summary": "Index summary loses",
+                        "firstPrompt": "first prompt loses",
+                        "messageCount": 3,
+                        "modified": "2026-07-09T10:00:00Z",
+                        "projectPath": "/home/test"
+                    }}]
+                }}"#,
+                sid = session_id,
+                fp = full_path,
+            ),
+        );
+
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].session_id, session_id);
+        assert_eq!(out[0].title, "Jsonl Wins");
     }
 }
