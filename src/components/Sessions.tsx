@@ -18,8 +18,20 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { GithubIcon } from "@/components/GitHubSync";
 import { useSessionTranscript, useSessions } from "@/hooks/useSessions";
-import type { SessionMessage, SessionSummary } from "@/lib/types";
+import { useSessionUpload } from "@/hooks/useSessionUpload";
+import {
+  SessionUploadProvider,
+  useSessionUploadContext,
+} from "@/hooks/SessionUploadContext";
+import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
+import type { SessionMessage, SessionSummary, SyncState } from "@/lib/types";
 import type {
   GlobalTabProps,
   SidebarTabButtonProps,
@@ -78,6 +90,8 @@ const UNGROUPED_KEY = "__ungrouped__";
  */
 export function SessionsView({ onClose }: GlobalTabProps) {
   const { sessions, loading, refresh } = useSessions();
+  const { config } = useGitHubSyncContext();
+  const { stateById, uploadingIds, upload } = useSessionUpload(sessions);
   const [selected, setSelected] = useState<SessionSummary | null>(null);
 
   const initialLoad = sessions.length === 0 && loading;
@@ -145,7 +159,16 @@ export function SessionsView({ onClose }: GlobalTabProps) {
           </p>
         </div>
       ) : (
-        <ProjectAccordion groups={groups} onSelect={setSelected} />
+        <SessionUploadProvider
+          value={{
+            stateById,
+            uploadingIds,
+            upload,
+            connected: config.isConnected,
+          }}
+        >
+          <ProjectAccordion groups={groups} onSelect={setSelected} />
+        </SessionUploadProvider>
       )}
 
       {!initialLoad && sessions.length > 0 && (
@@ -370,16 +393,19 @@ interface RowProps {
 }
 
 function SessionRow({ session, onSelect }: RowProps) {
+  const uploadCtx = useSessionUploadContext();
   return (
-    <li>
+    <li
+      className={cn(
+        "group flex items-start gap-2 pr-3 transition-colors",
+        "hover:bg-muted/40",
+      )}
+    >
       <button
         type="button"
         onClick={() => onSelect(session)}
         title={session.full_path}
-        className={cn(
-          "group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors",
-          "hover:bg-muted/40 cursor-pointer",
-        )}
+        className="flex min-w-0 flex-1 items-start gap-3 px-4 py-2.5 text-left cursor-pointer"
       >
         <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
           <MessageSquare className="size-3.5 text-muted-foreground/70 group-hover:text-foreground" />
@@ -415,17 +441,81 @@ function SessionRow({ session, onSelect }: RowProps) {
             )}
           </div>
         </div>
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden
-          className="mt-0.5 shrink-0 size-3.5 text-muted-foreground/40"
-          fill="currentColor"
-        >
-          <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" />
-        </svg>
       </button>
+      <SessionSyncButton session={session} ctx={uploadCtx} />
     </li>
   );
+}
+
+/**
+ * Per-row GitHub upload affordance. Color encodes sync state:
+ * gray = never uploaded, green = synced, amber = local changes since
+ * upload, spinner = upload in flight. Renders a static muted mark when
+ * GitHub isn't connected (no provider or `connected` false).
+ */
+function SessionSyncButton({
+  session,
+  ctx,
+}: {
+  session: SessionSummary;
+  ctx: ReturnType<typeof useSessionUploadContext>;
+}) {
+  if (!ctx || !ctx.connected) {
+    return (
+      <GithubIcon className="mt-2.5 shrink-0 size-3.5 text-muted-foreground/30" />
+    );
+  }
+
+  const uploading = ctx.uploadingIds.has(session.session_id);
+  const state: SyncState =
+    ctx.stateById.get(session.session_id) ?? "never_uploaded";
+
+  const { color, tooltip } = syncIconMeta(state);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        disabled={uploading}
+        aria-label={tooltip}
+        onClick={(e) => {
+          e.stopPropagation();
+          ctx.upload(session);
+        }}
+        className={cn(
+          "mt-1.5 shrink-0 rounded-md p-1 transition-colors",
+          uploading ? "cursor-default" : "cursor-pointer hover:bg-muted",
+        )}
+      >
+        {uploading ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <GithubIcon className={cn("size-3.5", color)} />
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="left">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function syncIconMeta(state: SyncState): { color: string; tooltip: string } {
+  switch (state) {
+    case "synced":
+      return {
+        color: "text-primary",
+        tooltip: "Uploaded to GitHub — click to update",
+      };
+    case "out_of_sync":
+      return {
+        color: "text-amber-600 dark:text-amber-400",
+        tooltip: "Local changes since upload — click to update",
+      };
+    case "never_uploaded":
+    default:
+      return {
+        color: "text-muted-foreground/50",
+        tooltip: "Upload to GitHub",
+      };
+  }
 }
 
 // ---------------------------------------------------------------------------

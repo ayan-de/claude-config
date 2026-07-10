@@ -36,11 +36,11 @@ import { cn } from "@/lib/utils";
 import type { GitHubPollOutcome } from "@/lib/types";
 
 /**
- * Inline GitHub mark — lucide-react doesn't ship a `Github` icon, so
- * we use the same hand-coded SVG that already lives in Sessions.tsx
- * (the per-row upload affordance). Keep them visually consistent.
+ * Inline GitHub mark — lucide-react doesn't ship a `Github` icon, so we
+ * hand-code the SVG here and reuse it for the per-row upload affordance
+ * in Sessions.tsx (exported so both stay visually identical).
  */
-function GithubIcon({ className }: { className?: string }) {
+export function GithubIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
