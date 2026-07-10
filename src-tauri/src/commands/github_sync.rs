@@ -383,7 +383,9 @@ pub fn github_upload_session_cmd(
         },
     ];
 
-    let message = format!("sync: {} ({})", session_id, slug);
+    let title = crate::storage::sessions::extract_title_from_jsonl(&full_path)
+        .unwrap_or_else(|| session_id.clone());
+    let message = format!("sync: {} ({})", title, slug);
     let result =
         gh_upload::upload_files(token, &owner, &cfg.repo_name, &message, &files).map_err(map_gh)?;
 
