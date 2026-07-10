@@ -325,6 +325,20 @@ function SessionGroup({
     () => splitBreadcrumbs(group.label),
     [group.label],
   );
+  const uploadCtx = useSessionUploadContext();
+  const syncCounts = useMemo(() => {
+    if (!uploadCtx) return null;
+    let never = 0,
+      dirty = 0,
+      synced = 0;
+    for (const s of group.sessions) {
+      const st = uploadCtx.stateById.get(s.session_id) ?? "never_uploaded";
+      if (st === "synced") synced++;
+      else if (st === "out_of_sync") dirty++;
+      else never++;
+    }
+    return { never, dirty, synced };
+  }, [uploadCtx, group.sessions]);
   const isUngrouped = group.label === "(unindexed)";
 
   return (
@@ -358,9 +372,25 @@ function SessionGroup({
             <BreadcrumbPath segments={segments} />
           )}
         </div>
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-          {group.sessions.length}
-        </span>
+        {syncCounts && (
+          <span
+            className="hidden items-center gap-2 sm:inline-flex text-[10px] tabular-nums"
+            aria-label="GitHub sync breakdown"
+          >
+            <span className="inline-flex items-center gap-0.5 text-muted-foreground/70">
+              <GithubIcon className="size-2.5 text-muted-foreground/50" />
+              {syncCounts.never}
+            </span>
+            <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+              <GithubIcon className="size-2.5" />
+              {syncCounts.dirty}
+            </span>
+            <span className="inline-flex items-center gap-0.5 text-primary">
+              <GithubIcon className="size-2.5" />
+              {syncCounts.synced}
+            </span>
+          </span>
+        )}
       </button>
       {open && (
         <ul className="divide-y divide-border/60 border-t border-border/40">
