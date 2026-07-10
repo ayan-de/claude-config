@@ -16,6 +16,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "updater:default",
-    "opener:default"
+    "opener:default",
+    "dialog:default"
   ]
 }
