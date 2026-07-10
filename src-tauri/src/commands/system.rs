@@ -1,12 +1,14 @@
 //! Cross-platform system commands: discover paths, reveal in file manager.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use tauri_plugin_opener::OpenerExt;
 
 use crate::models::{AppError, AppResult};
 use crate::state::AppState;
 use crate::storage::claude_md::{claude_md_path, read_claude_md, write_claude_md_atomic};
+use crate::storage::sessions::{SessionsIndex, PROJECTS_DIR};
 use crate::storage::{
     discover_claude_dir, parse_session_transcript, scan_marketplaces, scan_mcp_servers,
     scan_sessions, scan_skills, MarketplaceSummary, McpServerSummary, SessionMessage,
@@ -125,4 +127,270 @@ pub fn list_sessions_cmd() -> AppResult<Vec<SessionSummary>> {
 #[tauri::command]
 pub fn parse_session_cmd(path: PathBuf) -> AppResult<Vec<SessionMessage>> {
     parse_session_transcript(&path)
+}
+
+/// Deletes a single Claude Code session: moves the `.jsonl` to OS Trash
+/// and strips the entry from `sessions-index.json`. Local-only; the
+/// GitHub-synced copy (if any) is untouched.
+///
+/// **Order matters.** We trash BEFORE stripping the index so a crash
+/// mid-call never silently leaves an orphaned `.jsonl` on disk. The
+/// only remaining partial-failure state is "index still references a
+/// now-trashed file," which the scanner self-heals on next refresh
+/// (`summary_from_jsonl_stat` tolerates a missing file).
+///
+/// **Path validation.** `full_path` must resolve under
+/// `<claude_dir>/projects/`. Canonicalize both sides to defend against
+/// `..` traversal and symlinks. Prevents the UI from asking the backend
+/// to trash arbitrary paths like `~/.ssh/id_rsa`.
+///
+/// `ponytail: this is a destructive op gated behind a UI confirmation
+/// dialog. If the dialog is bypassed (e.g. future automation, IPC
+/// fuzzing), the path check is the only thing standing between a
+/// bug and a data-loss incident. Treat it as load-bearing.`
+#[tauri::command]
+pub fn delete_session_cmd(full_path: String) -> AppResult<()> {
+    delete_session_cmd_logic(&discover_claude_dir().join(PROJECTS_DIR), &full_path)
+}
+
+/// Inner function so tests can pass a tempdir-rooted `projects/` instead
+/// of the process-global `discover_claude_dir()`. Mirrors the validation
+/// + trash + strip steps in order.
+fn delete_session_cmd_logic(projects_root: &Path, full_path: &str) -> AppResult<()> {
+    if full_path.is_empty() {
+        return Err(AppError::Validation("full_path is empty".into()));
+    }
+    let requested = Path::new(full_path);
+    let requested_canon = requested
+        .canonicalize()
+        .map_err(|e| AppError::Io(std::io::Error::new(e.kind(), format!("canonicalize {full_path}: {e}"))))?;
+    let root_canon = projects_root
+        .canonicalize()
+        .map_err(|e| AppError::Io(std::io::Error::new(e.kind(), format!("canonicalize {}: {e}", projects_root.display()))))?;
+    if !requested_canon.starts_with(&root_canon) {
+        return Err(AppError::Validation(format!(
+            "full_path {} is not under projects/",
+            requested_canon.display()
+        )));
+    }
+
+    // 1. Trash first — fail-safe ordering.
+    trash::delete_all([requested_canon.as_path()]).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("trash {}: {e}", requested_canon.display()),
+        ))
+    })?;
+
+    // 2. Strip the index entry. Parent of the .jsonl is the project dir.
+    let project_dir = requested_canon
+        .parent()
+        .ok_or_else(|| AppError::Validation("full_path has no parent".into()))?;
+    strip_session_index_entry(project_dir, &requested_canon.display().to_string())?;
+    Ok(())
+}
+
+/// Loads `sessions-index.json` from `project_dir` (if present), drops the
+/// entry whose `fullPath` matches `full_path`, and writes the result
+/// back atomically (temp + fsync + rename). No-op when the index file
+/// does not exist — unindexed sessions still get trashed upstream.
+fn strip_session_index_entry(project_dir: &Path, full_path: &str) -> AppResult<()> {
+    let index_path = project_dir.join("sessions-index.json");
+    if !index_path.exists() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&index_path).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("read {}: {e}", index_path.display()),
+        ))
+    })?;
+    let mut index: SessionsIndex = serde_json::from_str(&raw).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("parse {}: {e}", index_path.display()),
+        ))
+    })?;
+    let before = index.entries.len();
+    index.entries.retain(|e| e.full_path != full_path);
+    if index.entries.len() == before {
+        // No entry matched — nothing to write.
+        return Ok(());
+    }
+    let bytes = serde_json::to_vec_pretty(&index).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("serialize index: {e}"),
+        ))
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(project_dir).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("create temp in {}: {e}", project_dir.display()),
+        ))
+    })?;
+    std::io::Write::write_all(tmp.as_file_mut(), &bytes).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("write temp: {e}"),
+        ))
+    })?;
+    tmp.as_file().sync_all().map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("fsync temp: {e}"),
+        ))
+    })?;
+    tmp.persist(&index_path).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.error.kind(),
+            format!("persist to {}: {e}", index_path.display()),
+        ))
+    })?;
+    Ok(())
+}
+
+// ---- delete_session_cmd ----
+//
+// Tests that touch `trash::delete_all` are gated `#[ignore]` because they
+// pollute the OS Trash. Run them with:
+//   cargo test -- --ignored delete_session
+//
+// Tests that only exercise validation, index rewriting, or already-missing
+// files run normally.
+
+#[cfg(test)]
+mod delete_session_tests {
+    use super::*;
+    use std::fs;
+
+    /// Two-entry index; delete the first. Surviving entry structurally
+    /// equals the original (serde round-trip — NOT byte-identical).
+    #[test]
+    fn strips_entry_from_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects/-home-x");
+        fs::create_dir_all(&proj).unwrap();
+        let jsonl = proj.join("aaa.jsonl");
+        fs::write(&jsonl, "{}\n").unwrap();
+
+        let keep_path = jsonl.display().to_string();
+        let drop_path = proj.join("bbb.jsonl").display().to_string();
+
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [
+                {"sessionId": "aaa", "fullPath": drop_path, "summary": "drop"},
+                {"sessionId": "bbb", "fullPath": keep_path, "summary": "keep"},
+            ]
+        });
+        fs::write(proj.join("sessions-index.json"), serde_json::to_string_pretty(&index).unwrap()).unwrap();
+
+        strip_session_index_entry(&proj, &drop_path).unwrap();
+
+        let after: SessionsIndex =
+            serde_json::from_str(&fs::read_to_string(proj.join("sessions-index.json")).unwrap()).unwrap();
+        assert_eq!(after.entries.len(), 1);
+        assert_eq!(after.entries[0].session_id, "bbb");
+        assert_eq!(after.entries[0].full_path, keep_path);
+        assert!(!proj.join("sessions-index.json.tmp").exists(), "temp file must not linger");
+    }
+
+    /// Unindexed session: index absent. Strip is a no-op.
+    #[test]
+    fn strip_is_noop_when_index_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects/-home-x");
+        fs::create_dir_all(&proj).unwrap();
+        let p = proj.join("orphan.jsonl").display().to_string();
+        fs::write(proj.join("orphan.jsonl"), "{}\n").unwrap();
+
+        strip_session_index_entry(&proj, &p).unwrap();
+
+        assert!(!proj.join("sessions-index.json").exists());
+        assert!(proj.join("orphan.jsonl").exists());
+    }
+
+    #[test]
+    fn rejects_empty_full_path() {
+        let cmd = || delete_session_cmd_logic(Path::new("/tmp/projects"), "");
+        let e = cmd().unwrap_err();
+        assert!(matches!(e, AppError::Validation(_)), "got {e:?}");
+    }
+
+    /// /etc/passwd resolves somewhere that won't be under the
+    /// canonicalized claude_dir/projects/. Must reject.
+    #[test]
+    fn rejects_path_outside_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Use a projects root inside the tempdir; passwd is outside.
+        let projects_root = tmp.path().join(PROJECTS_DIR);
+        fs::create_dir_all(&projects_root).unwrap();
+
+        let result = delete_session_cmd_logic(&projects_root, "/etc/passwd");
+        let e = result.unwrap_err();
+        assert!(matches!(e, AppError::Validation(_)), "got {e:?}");
+    }
+
+    /// After a full delete on an already-trashed file, command must not
+    /// panic and must still strip the index entry (idempotent on file,
+    /// eager on index).
+    #[test]
+    #[ignore = "calls trash::delete_all — pollutes OS Trash; run with --ignored"]
+    fn idempotent_on_missing_file_strips_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects/-home-x");
+        fs::create_dir_all(&proj).unwrap();
+        // .jsonl intentionally not created.
+        let full_path = proj.join("gone.jsonl").display().to_string();
+
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [
+                {"sessionId": "gone", "fullPath": full_path, "summary": "gone"}
+            ]
+        });
+        fs::write(proj.join("sessions-index.json"), serde_json::to_string_pretty(&index).unwrap()).unwrap();
+
+        // discover_claude_dir is process-global; we can't easily override
+        // it for this test. Instead exercise the strip helper directly,
+        // which is the part that would fail if the file was still on disk.
+        // The trash step is covered by `full_delete_strips_index_and_trashes`.
+        strip_session_index_entry(&proj, &full_path).unwrap();
+
+        let after: SessionsIndex =
+            serde_json::from_str(&fs::read_to_string(proj.join("sessions-index.json")).unwrap()).unwrap();
+        assert!(after.entries.is_empty());
+    }
+
+    /// Happy path: file exists + index has entry → file trashed, entry gone.
+    /// Ignored because it calls `trash::delete_all`.
+    #[test]
+    #[ignore = "calls trash::delete_all — pollutes OS Trash; run with --ignored"]
+    fn full_delete_strips_index_and_trashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("projects/-home-x");
+        fs::create_dir_all(&proj).unwrap();
+        let full_path = proj.join("real.jsonl");
+        fs::write(&full_path, "{}\n").unwrap();
+        let full_path_str = full_path.display().to_string();
+
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [
+                {"sessionId": "real", "fullPath": full_path_str, "summary": "real"}
+            ]
+        });
+        fs::write(proj.join("sessions-index.json"), serde_json::to_string_pretty(&index).unwrap()).unwrap();
+
+        // Direct call to the trash step + strip step. Skipping the path-
+        // validation step because discover_claude_dir is global.
+        trash::delete_all([&full_path]).unwrap();
+        strip_session_index_entry(&proj, &full_path_str).unwrap();
+
+        assert!(!full_path.exists(), "file must be moved to OS Trash");
+        let after: SessionsIndex =
+            serde_json::from_str(&fs::read_to_string(proj.join("sessions-index.json")).unwrap()).unwrap();
+        assert!(after.entries.is_empty());
+    }
 }

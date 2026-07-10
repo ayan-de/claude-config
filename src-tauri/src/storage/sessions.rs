@@ -17,45 +17,45 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::models::{AppError, AppResult};
 
-const PROJECTS_DIR: &str = "projects";
+pub(crate) const PROJECTS_DIR: &str = "projects";
 const SESSIONS_INDEX: &str = "sessions-index.json";
 
 /// Schema of Claude Code's per-project `sessions-index.json`. All fields
 /// optional except `version` + `entries` so an older index still parses.
-#[derive(Debug, Deserialize)]
-struct SessionsIndex {
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct SessionsIndex {
     #[allow(dead_code)]
-    version: u32,
+    pub(crate) version: u32,
     #[serde(default)]
-    entries: Vec<SessionIndexEntry>,
+    pub(crate) entries: Vec<SessionIndexEntry>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct SessionIndexEntry {
+pub(crate) struct SessionIndexEntry {
     #[serde(default)]
-    session_id: String,
+    pub(crate) session_id: String,
     #[serde(default)]
-    full_path: String,
+    pub(crate) full_path: String,
     #[serde(default)]
-    first_prompt: Option<String>,
+    pub(crate) first_prompt: Option<String>,
     #[serde(default)]
-    summary: Option<String>,
+    pub(crate) summary: Option<String>,
     #[serde(default)]
-    message_count: Option<u32>,
+    pub(crate) message_count: Option<u32>,
     #[serde(default)]
-    created: Option<String>,
+    pub(crate) created: Option<String>,
     #[serde(default)]
-    modified: Option<String>,
+    pub(crate) modified: Option<String>,
     #[serde(default)]
-    project_path: Option<String>,
+    pub(crate) project_path: Option<String>,
     #[serde(default)]
-    is_sidechain: Option<bool>,
+    pub(crate) is_sidechain: Option<bool>,
 }
 
 /// One row for the sidebar Sessions list. Slimmed to what the UI actually
