@@ -447,6 +447,11 @@ fn mtime_rfc3339(meta: &std::fs::Metadata) -> Option<String> {
 /// repo, returning the serialized bytes to commit. Fetches the existing
 /// file (if any) so we preserve other sessions' entries and don't clobber
 /// `original_path`.
+///
+/// `title` and `message_count` come from parsing the local transcript at
+/// upload time (same data the commit message is built from). They are
+/// stored here so the Remote tab can show meaningful row labels and
+/// counts without re-fetching + re-parsing every `.jsonl`.
 fn build_project_metadata(
     token: &str,
     owner: &str,
@@ -455,7 +460,9 @@ fn build_project_metadata(
     slug: &str,
     session_id: &str,
     project_path: &str,
+    title: Option<String>,
     modified: Option<String>,
+    message_count: u32,
 ) -> AppResult<Vec<u8>> {
     let meta_path = storage::project_metadata_path(slug);
     let existing =
@@ -473,9 +480,9 @@ fn build_project_metadata(
     meta.sessions.insert(
         session_id.to_string(),
         RemoteSessionEntry {
-            title: None,
+            title,
             modified,
-            message_count: 0,
+            message_count,
         },
     );
     Ok(serde_json::to_vec_pretty(&meta)?)
@@ -514,6 +521,14 @@ pub fn github_upload_session_cmd(
     let modified = mtime_rfc3339(&meta);
     let content = std::fs::read(&full_path)?;
 
+    // Compute the row's title + message count up front. Both are
+    // persisted into the per-project `metadata.json` so the Remote tab
+    // has meaningful labels and counts without re-fetching + parsing
+    // every transcript.
+    let title = crate::storage::sessions::extract_title_from_jsonl(&full_path);
+    let message_count =
+        crate::storage::sessions::parse_session_transcript(&full_path)?.len() as u32;
+
     let slug = slug_from_full_path(&full_path)?;
     let secret = load_github_token(&state)?;
     let token = &secret.access_token;
@@ -532,7 +547,9 @@ pub fn github_upload_session_cmd(
         &slug,
         &session_id,
         &project_path,
+        title.clone(),
         modified.clone(),
+        message_count,
     )?;
 
     let files = vec![
@@ -546,9 +563,7 @@ pub fn github_upload_session_cmd(
         },
     ];
 
-    let title = crate::storage::sessions::extract_title_from_jsonl(&full_path)
-        .unwrap_or_else(|| session_id.clone());
-    let message = format!("sync: {} ({})", title, slug);
+    let message = format!("sync: {} ({})", title.unwrap_or_else(|| session_id.clone()), slug);
     let result =
         gh_upload::upload_files(token, &owner, &cfg.repo_name, &message, &files).map_err(map_gh)?;
 
