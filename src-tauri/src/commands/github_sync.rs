@@ -958,14 +958,25 @@ pub fn github_download_session_cmd(
     }
     std::fs::rename(&tmp_path, &target_jsonl)?;
 
-    // Register with Claude Code's sessions-index.json.
+    // Register with Claude Code's sessions-index.json. Populate the
+    // user-visible fields (`first_prompt`, `message_count`) from the
+    // transcript so the `/resume` picker shows the session as a real,
+    // labeled entry instead of "(no messages)".
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let messages =
+        crate::storage::sessions::parse_session_transcript(&target_jsonl).unwrap_or_default();
+    let message_count = messages.len() as u32;
+    let first_prompt = messages
+        .iter()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.clone())
+        .filter(|s| !s.is_empty());
     let entry = crate::storage::sessions::SessionIndexEntry {
         session_id: session_id.clone(),
         full_path: target_jsonl.display().to_string(),
-        first_prompt: None,
+        first_prompt,
         summary: None,
-        message_count: Some(0),
+        message_count: Some(message_count),
         created: Some(now.clone()),
         modified: Some(now.clone()),
         project_path: None,

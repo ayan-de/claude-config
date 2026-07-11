@@ -1310,4 +1310,60 @@ mod tests {
         assert!(raw.contains("v2"), "raw was:\n{raw}");
         assert!(!raw.contains("v1"), "raw was:\n{raw}");
     }
+
+    /// Builds a transcript with two user turns (one of which carries the
+    /// answer the Remote tab will use as `first_prompt`), two assistant
+    /// turns, plus two system rows that the parser must drop.
+    fn transcript_fixture() -> String {
+        [
+            r#"{"type":"system","message":{"role":"system","content":"seed"},"timestamp":"2026-07-09T10:00:00Z"}"#,
+            r#"{"type":"user","message":{"role":"user","content":"add the resume button"},"timestamp":"2026-07-09T10:00:01Z"}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":"sure, here is the plan"},"timestamp":"2026-07-09T10:00:02Z"}"#,
+            r#"{"type":"summary","summary":"session summary text","timestamp":"2026-07-09T10:00:03Z"}"#,
+            r#"{"type":"user","message":{"role":"user","content":"looks good, ship it"},"timestamp":"2026-07-09T10:00:04Z"}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":"shipped"},"timestamp":"2026-07-09T10:00:05Z"}"#,
+            r#"{"type":"queue-operation","content":"x","timestamp":"2026-07-09T10:00:06Z"}"#,
+        ]
+        .join("\n")
+            + "\n"
+    }
+
+    #[test]
+    fn parse_session_transcript_counts_only_user_and_assistant() {
+        // The download path uses `parse_session_transcript(...).len()` as
+        // the `message_count` it stores in sessions-index.json. The count
+        // must reflect user+assistant turns only — system / summary /
+        // queue-operation rows are not conversation messages.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("session.jsonl");
+        std::fs::write(&p, transcript_fixture()).unwrap();
+
+        let msgs = parse_session_transcript(&p).unwrap();
+        assert_eq!(msgs.len(), 4, "two user + two assistant = 4");
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].content, "add the resume button");
+        assert!(msgs.iter().all(|m| m.role == "user" || m.role == "assistant"));
+    }
+
+    #[test]
+    fn first_user_message_extraction_picks_earliest_user_turn() {
+        // The download path uses the earliest user message content as
+        // `first_prompt` for Claude Code's `/resume` picker.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("session.jsonl");
+        std::fs::write(&p, transcript_fixture()).unwrap();
+
+        let msgs = parse_session_transcript(&p).unwrap();
+        let first = msgs.iter().find(|m| m.role == "user").unwrap();
+        assert_eq!(first.content, "add the resume button");
+    }
+
+    #[test]
+    fn empty_transcript_returns_no_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("empty.jsonl");
+        std::fs::write(&p, "").unwrap();
+        let msgs = parse_session_transcript(&p).unwrap();
+        assert!(msgs.is_empty());
+    }
 }
