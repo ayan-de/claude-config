@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::github::cache as gh_cache;
 use crate::github::client::GitHubError;
 use crate::github::device_flow::{
     poll_device_flow as poll_df, start_device_flow as start_df, DeviceFlowOutcome,
@@ -57,6 +58,41 @@ fn sync_config_path(state: &AppState) -> PathBuf {
 
 fn mappings_path(state: &AppState) -> PathBuf {
     storage::path_mappings_path(state.app_data_dir.as_ref())
+}
+
+/// Resolve `(owner, default_branch)` for the connected sync repo, hitting
+/// GitHub only on a cold cache. Both fields are tied to the access token
+/// and change at most once per login, so caching them across commands is
+/// safe — we invalidate the whole cache on `github_disconnect_cmd` and on
+/// every fresh OAuth login.
+fn resolve_owner_and_branch(
+    state: &AppState,
+    token: &str,
+    repo_name: &str,
+) -> AppResult<(String, String)> {
+    {
+        let c = state.github_cache.lock().expect("github_cache poisoned");
+        if let (Some(o), Some(b)) = (&c.owner, &c.default_branch) {
+            return Ok((o.clone(), b.clone()));
+        }
+    }
+    // NOTE: we drop the lock before the HTTP calls so a stuck request
+    // can't block every other command. Two concurrent misses will
+    // therefore each fire the pair of HTTP calls — this is not
+    // single-flight. Acceptable for this feature's usage pattern
+    // (human-driven tab clicks don't race), but do not assume dedupe if
+    // a future caller starts firing this concurrently from a
+    // background task.
+    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+    let repo = gh_repo::get_repo(token, &owner, repo_name)
+        .map_err(map_gh)?
+        .ok_or_else(|| AppError::Validation("sync repo does not exist".into()))?;
+    {
+        let mut c = state.github_cache.lock().expect("github_cache poisoned");
+        c.owner = Some(owner.clone());
+        c.default_branch = Some(repo.default_branch.clone());
+    }
+    Ok((owner, repo.default_branch))
 }
 
 // ===================================================================
@@ -114,6 +150,19 @@ pub fn github_poll_device_flow_cmd(
                 .set_secret(GITHUB_KEYRING_ACCOUNT, &secret)
                 .map_err(AppError::from)?;
 
+            // Seed the in-memory cache. `username` is GitHub's `login`
+            // and is byte-identical to what `get_authenticated_user`
+            // would return — this skips the GET /user call on the first
+            // tab open after connecting. `default_branch` cannot be
+            // seeded here because the sync repo may not exist yet at
+            // OAuth time; `resolve_owner_and_branch` will fill it on
+            // first list call.
+            {
+                let mut c = state.github_cache.lock().expect("github_cache poisoned");
+                c.clear();
+                c.owner = Some(username.clone());
+            }
+
             let cfg_path = sync_config_path(&state);
             let mut cfg = storage::load_github_sync_config(&cfg_path)?;
             cfg.is_connected = true;
@@ -144,6 +193,14 @@ pub fn github_disconnect_cmd(
     state: tauri::State<'_, AppState>,
 ) -> AppResult<()> {
     let _ = state.keyring.delete_token(GITHUB_KEYRING_ACCOUNT);
+
+    // Wipe every cache tier in lockstep with the token: in-memory
+    // owner/branch/SHA/list/tree AND the on-disk blob cache. Token
+    // gone, sensitive data gone — same invariant.
+    state.github_cache.lock().expect("github_cache poisoned").clear();
+    if let Err(e) = gh_cache::clear_blob_cache(state.app_data_dir.as_ref()) {
+        log::warn!("blob cache clear on disconnect failed: {e}");
+    }
 
     let cfg_path = sync_config_path(&state);
     let mut cfg = storage::load_github_sync_config(&cfg_path)?;
@@ -430,6 +487,17 @@ pub fn github_upload_session_cmd(
     cfg.last_sync = Some(now);
     storage::save_github_sync_config(&cfg_path, &cfg)?;
 
+    // Invalidate the remote-list cache: we just moved the default
+    // branch's HEAD forward, so the cached list/tree/commit_sha are
+    // stale. Dropping them forces the next `github_list_remote_sessions_cmd`
+    // to refetch. Owner + default_branch are still correct.
+    {
+        let mut cache = state.github_cache.lock().expect("github_cache poisoned");
+        cache.commit_sha = None;
+        cache.tree = None;
+        cache.sessions_list = None;
+    }
+
     Ok(sync_meta)
 }
 
@@ -542,6 +610,11 @@ pub struct RepoProbeResult {
 ///
 /// Async + `spawn_blocking` so the blocking HTTP calls to GitHub don't
 /// freeze the WebView's main thread.
+///
+/// SHA-gated cache: on a warm cache with no upstream changes, this is
+/// a single `GET /git/ref/heads/{branch}` call. On a SHA shift we fall
+/// through to a tree walk + metadata fetches only for the slugs whose
+/// tree entries actually changed.
 #[tauri::command]
 pub async fn github_list_remote_sessions_cmd(
     state: tauri::State<'_, AppState>,
@@ -555,18 +628,73 @@ pub async fn github_list_remote_sessions_cmd(
         }
         let secret = load_github_token(&state)?;
         let token = &secret.access_token;
-        let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
 
-        // If the repo doesn't exist, the user has never uploaded — empty list.
-        // Use get_repo (read-only), NOT gh_upload::ensure_repo, which would
-        // create the repo as a side effect.
+        // Repo probe — distinguishes "never uploaded" (no repo) from
+        // an actual GitHub failure. Returns Ok(None) for the empty-
+        // repo fast path.
+        let owner = {
+            let c = state.github_cache.lock().expect("github_cache poisoned");
+            c.owner.clone()
+        };
+        let owner = match owner {
+            Some(o) => o,
+            None => gh_repo::get_authenticated_user(token).map_err(map_gh)?,
+        };
         let repo = gh_repo::get_repo(token, &owner, &cfg.repo_name).map_err(map_gh)?;
         let Some(repo) = repo else {
             return Ok(Vec::new());
         };
+        // Cold-cache fill: owner is now known; default_branch can be
+        // cached alongside it for next time.
+        {
+            let mut c = state.github_cache.lock().expect("github_cache poisoned");
+            c.owner = Some(owner.clone());
+            c.default_branch = Some(repo.default_branch.clone());
+        }
 
-        gh_repo::list_remote_sessions(token, &owner, &cfg.repo_name, &repo.default_branch)
-            .map_err(map_gh)
+        // SHA gate: 1 call. If the ref SHA matches our cache, return
+        // the cached list verbatim and we're done.
+        let current_ref_sha =
+            gh_repo::get_branch_ref_sha(token, &owner, &cfg.repo_name, &repo.default_branch)
+                .map_err(map_gh)?;
+        let (cached_sha, cached_list) = {
+            let c = state.github_cache.lock().expect("github_cache poisoned");
+            (c.commit_sha.clone(), c.sessions_list.clone())
+        };
+        if let (Some(cached_sha), Some(cached_list)) = (cached_sha, cached_list) {
+            if Some(&cached_sha) == current_ref_sha.as_ref() {
+                return Ok(cached_list);
+            }
+        }
+
+        // Cold or shifted SHA — full tree walk + per-slug diff.
+        let tree = gh_repo::get_tree_recursive(token, &owner, &cfg.repo_name, &repo.default_branch)
+            .map_err(map_gh)?;
+        let (previous_list, previous_tree) = {
+            let c = state.github_cache.lock().expect("github_cache poisoned");
+            (c.sessions_list.clone(), c.tree.clone())
+        };
+        let diff = gh_repo::diff_slugs(previous_tree.as_ref(), &tree);
+        let rows = gh_repo::list_remote_sessions_with_diff(
+            token,
+            &owner,
+            &cfg.repo_name,
+            &tree,
+            previous_list.as_deref(),
+            &diff,
+        )
+        .map_err(map_gh)?;
+
+        // Write-back the cache. Note: we persist the *current* tree,
+        // not a transformed one, so the next diff has the same source
+        // format (paths + SHAs).
+        {
+            let mut c = state.github_cache.lock().expect("github_cache poisoned");
+            c.tree = Some(tree);
+            c.commit_sha = current_ref_sha;
+            c.sessions_list = Some(rows.clone());
+        }
+        Ok(rows)
     })
     .await
     .map_err(|e| AppError::Internal(format!("list_remote_sessions task panicked: {e}")))?
@@ -681,7 +809,7 @@ pub fn github_download_session_cmd(
     }
 
     // Fetch and write the transcript atomically.
-    let bytes = gh_repo::get_blob(token, &owner, &cfg.repo_name, &blob_sha).map_err(map_gh)?;
+    let bytes = fetch_blob_cached(&state, token, &owner, &cfg.repo_name, &blob_sha)?;
     use std::io::Write;
     let tmp_path = target_jsonl.with_extension("jsonl.tmp");
     {
@@ -757,7 +885,7 @@ pub fn github_fetch_remote_transcript_cmd(
         .map_err(map_gh)?
         .ok_or_else(|| AppError::Validation("sync repo does not exist".into()))?;
 
-    let bytes = gh_repo::get_blob(token, &owner, &cfg.repo_name, &blob_sha).map_err(map_gh)?;
+    let bytes = fetch_blob_cached(&state, token, &owner, &cfg.repo_name, &blob_sha)?;
     let tmp = tempfile::NamedTempFile::new()?;
     std::fs::write(tmp.path(), &bytes)?;
 
@@ -772,16 +900,52 @@ pub fn github_fetch_remote_transcript_cmd(
     Ok(messages)
 }
 
+/// Fetch a session transcript blob, hitting the on-disk cache first.
+/// Cache writes are best-effort and never fail the parent command —
+/// GitHub remains the source of truth.
+fn fetch_blob_cached(
+    state: &AppState,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    blob_sha: &str,
+) -> AppResult<Vec<u8>> {
+    if let Some(bytes) = gh_cache::get_cached_blob(state.app_data_dir.as_ref(), blob_sha) {
+        return Ok(bytes);
+    }
+    let bytes = gh_repo::get_blob(token, owner, repo, blob_sha).map_err(map_gh)?;
+    if let Err(e) = gh_cache::put_cached_blob(state.app_data_dir.as_ref(), blob_sha, &bytes) {
+        log::warn!("blob cache put failed for {blob_sha}: {e}");
+    } else if let Err(e) =
+        gh_cache::enforce_blob_cache_size(state.app_data_dir.as_ref(), gh_cache::cache_cap_bytes())
+    {
+        log::warn!("blob cache eviction failed: {e}");
+    }
+    Ok(bytes)
+}
+
+/// Return blob cache size for a future settings-page UI.
+#[tauri::command]
+pub fn github_get_blob_cache_stats_cmd(
+    state: tauri::State<'_, AppState>,
+) -> gh_cache::BlobCacheStats {
+    gh_cache::blob_cache_stats(state.app_data_dir.as_ref())
+}
+
+/// Drop the in-memory cache. Frontend calls this for the "force
+/// refresh" escape hatch (Shift+Click on the Refresh button) so the
+/// next list call pays the full `2 + N` cost.
+#[tauri::command]
+pub fn github_invalidate_remote_cache_cmd(state: tauri::State<'_, AppState>) {
+    state.github_cache.lock().expect("github_cache poisoned").clear();
+}
+
 fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
     if !state.keyring.is_available() {
         return Err(AppError::KeyringUnavailable(
             "OS keyring is unavailable".into(),
         ));
     }
-    // We store as `ProviderSecret::Custom { auth_token }` so we can
-    // reuse the existing keyring JSON-blob machinery. (Storing under
-    // GITHUB_KEYRING_ACCOUNT gives us namespace isolation from
-    // providers.)
     use crate::models::ProviderSecret;
     let secret = state
         .keyring
