@@ -539,28 +539,37 @@ pub struct RepoProbeResult {
 
 /// List every session in the GitHub sync repo, grouped by project.
 /// Returns `[]` when the repo doesn't exist yet (user hasn't uploaded).
+///
+/// Async + `spawn_blocking` so the blocking HTTP calls to GitHub don't
+/// freeze the WebView's main thread.
 #[tauri::command]
-pub fn github_list_remote_sessions_cmd(
+pub async fn github_list_remote_sessions_cmd(
     state: tauri::State<'_, AppState>,
 ) -> AppResult<Vec<RemoteSessionSummary>> {
-    let cfg = storage::load_github_sync_config(&sync_config_path(&state))?;
-    if !cfg.is_connected {
-        return Err(AppError::GitHubNotConfigured("not_connected".into()));
-    }
-    let secret = load_github_token(&state)?;
-    let token = &secret.access_token;
-    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+    let state = state.inner().clone();
 
-    // If the repo doesn't exist, the user has never uploaded — empty list.
-    // Use get_repo (read-only), NOT gh_upload::ensure_repo, which would
-    // create the repo as a side effect.
-    let repo = gh_repo::get_repo(token, &owner, &cfg.repo_name).map_err(map_gh)?;
-    let Some(repo) = repo else {
-        return Ok(Vec::new());
-    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = storage::load_github_sync_config(&sync_config_path(&state))?;
+        if !cfg.is_connected {
+            return Err(AppError::GitHubNotConfigured("not_connected".into()));
+        }
+        let secret = load_github_token(&state)?;
+        let token = &secret.access_token;
+        let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
 
-    gh_repo::list_remote_sessions(token, &owner, &cfg.repo_name, &repo.default_branch)
-        .map_err(map_gh)
+        // If the repo doesn't exist, the user has never uploaded — empty list.
+        // Use get_repo (read-only), NOT gh_upload::ensure_repo, which would
+        // create the repo as a side effect.
+        let repo = gh_repo::get_repo(token, &owner, &cfg.repo_name).map_err(map_gh)?;
+        let Some(repo) = repo else {
+            return Ok(Vec::new());
+        };
+
+        gh_repo::list_remote_sessions(token, &owner, &cfg.repo_name, &repo.default_branch)
+            .map_err(map_gh)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("list_remote_sessions task panicked: {e}")))?
 }
 
 /// Resolve the local target folder for a remote project slug, if a

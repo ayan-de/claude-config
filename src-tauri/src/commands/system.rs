@@ -115,18 +115,28 @@ pub fn list_mcp_servers_cmd() -> AppResult<Vec<McpServerSummary>> {
 /// `<claude_dir>/projects/*/sessions-index.json` (plus a jsonl fallback
 /// for transcripts the index has not yet recorded). Honors
 /// `CLAUDE_CONFIG_DIR`. Newest activity first, sidechain entries skipped.
+///
+/// Async + `spawn_blocking` so the heavy directory walk and jsonl
+/// head/tail reads don't freeze the WebView's main thread.
 #[tauri::command]
-pub fn list_sessions_cmd() -> AppResult<Vec<SessionSummary>> {
-    scan_sessions(&discover_claude_dir())
+pub async fn list_sessions_cmd() -> AppResult<Vec<SessionSummary>> {
+    tauri::async_runtime::spawn_blocking(|| scan_sessions(&discover_claude_dir()))
+        .await
+        .map_err(|e| AppError::Internal(format!("list_sessions task panicked: {e}")))?
 }
 
 /// Parses a Claude Code `.jsonl` transcript at `path` into a flat list
 /// of messages for the in-app viewer. Honors `path` only — the caller
 /// passes the absolute path it received from `list_sessions_cmd`. Errors
 /// only if the file is unreadable; malformed lines are silently skipped.
+///
+/// Async + `spawn_blocking` so large transcript parsing doesn't freeze
+/// the WebView's main thread.
 #[tauri::command]
-pub fn parse_session_cmd(path: PathBuf) -> AppResult<Vec<SessionMessage>> {
-    parse_session_transcript(&path)
+pub async fn parse_session_cmd(path: PathBuf) -> AppResult<Vec<SessionMessage>> {
+    tauri::async_runtime::spawn_blocking(move || parse_session_transcript(&path))
+        .await
+        .map_err(|e| AppError::Internal(format!("parse_session task panicked: {e}")))?
 }
 
 /// Deletes a single Claude Code session: moves the `.jsonl` to OS Trash

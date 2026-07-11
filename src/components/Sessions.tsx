@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense, lazy } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   ChevronDown,
   ChevronUp,
@@ -23,6 +24,7 @@ import {
 import { GithubIcon } from "@/components/GitHubSync";
 import { SessionDeleteDialog } from "@/components/SessionDeleteDialog";
 import { MessageView } from "@/components/SessionMessageView";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useSessionTranscript, useSessions } from "@/hooks/useSessions";
 import { useSessionUpload } from "@/hooks/useSessionUpload";
 import {
@@ -31,12 +33,30 @@ import {
 } from "@/hooks/SessionUploadContext";
 import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { deleteSession } from "@/lib/api";
-import { RemoteSessionsTab } from "@/components/RemoteSessionsTab";
 import { SessionsTabs } from "@/components/SessionsTabs";
+
+const RemoteSessionsTab = lazy(() =>
+  import("@/components/RemoteSessionsTab").then((m) => ({
+    default: m.RemoteSessionsTab,
+  }))
+);
+
+function RemoteSessionsLoadingFallback() {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-lg border bg-card/40 px-4 py-10">
+      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      <p className="text-[11px] text-muted-foreground">
+        Loading remote sessions…
+      </p>
+    </div>
+  );
+}
+
 import type { SessionSummary, SyncState } from "@/lib/types";
 import type {
   GlobalTabProps,
   SidebarTabButtonProps,
+  GlobalTabId,
 } from "@/data/globalTabs";
 import { cn } from "@/lib/utils";
 
@@ -237,14 +257,52 @@ export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
       )}
       </div>
 
-      <div className={activeTab === "remote" ? "" : "hidden"}>
-        <RemoteSessionsTab
-          onDownloaded={async () => {
-            await refresh();
+      {activeTab === "remote" && (
+        <ErrorBoundary
+          fallback={(err, reset) => {
+            const cta = (err as { cta?: { label: string; navigateTo: GlobalTabId } }).cta;
+            return (
+              <div className="rounded-lg border bg-card/40 px-4 py-8 text-center">
+                <AlertTriangle className="mx-auto size-5 text-destructive" />
+                <p className="mt-2 text-sm font-medium text-destructive">Failed to load remote sessions</p>
+                <p className="mx-auto mt-1 max-w-sm text-[11px] text-muted-foreground">
+                  {err.message}
+                </p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={reset}
+                    className="mt-1 cursor-pointer"
+                  >
+                    <RefreshCw className="size-3.5 mr-1" />
+                    Retry
+                  </Button>
+                  {cta && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => onNavigate?.(cta.navigateTo)}
+                      className="mt-1 cursor-pointer"
+                    >
+                      {cta.label}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
           }}
-          onNavigate={onNavigate}
-        />
-      </div>
+        >
+          <Suspense fallback={<RemoteSessionsLoadingFallback />}>
+            <RemoteSessionsTab
+              onDownloaded={async () => {
+                await refresh();
+              }}
+              onNavigate={onNavigate}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       <SessionDeleteDialog
         open={!!deleteTarget}

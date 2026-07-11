@@ -13,6 +13,15 @@ import type { RemoteSessionSummary } from "@/lib/types";
 import { AppError } from "@/lib/api";
 import type { GlobalTabId } from "@/data/globalTabs";
 
+export class RemoteSessionsError extends Error {
+  cta?: { label: string; navigateTo: GlobalTabId };
+  constructor(message: string, cta?: { label: string; navigateTo: GlobalTabId }) {
+    super(message);
+    this.name = "RemoteSessionsError";
+    this.cta = cta;
+  }
+}
+
 interface Props {
   /** Called after a successful download so the parent can refresh local sessions. */
   onDownloaded: () => void;
@@ -64,6 +73,11 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
     [error],
   );
   const initialLoad = loading && sessions.length === 0 && error === null;
+
+  // Throw error when sessions.length === 0 so that parent ErrorBoundary catches it
+  if (!initialLoad && error && sessions.length === 0 && classified) {
+    throw new RemoteSessionsError(classified.message, classified.cta);
+  }
 
   // Not connected — show CTA.
   if (!config.isConnected) {
@@ -141,39 +155,8 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
         </div>
       )}
 
-      {/* Error with no data — full error card */}
-      {!initialLoad && error && sessions.length === 0 && classified && (
-        <div className="rounded-lg border bg-card/40 px-4 py-8 text-center">
-          <AlertTriangle className="mx-auto size-5 text-destructive" />
-          <p className="mt-2 text-sm font-medium">{classified.message}</p>
-          <div className="mt-4 flex justify-center gap-2">
-            {classified.retryable && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void refresh()}
-                className="cursor-pointer"
-              >
-                <RefreshCw className="size-3.5" />
-                Retry
-              </Button>
-            )}
-            {classified.cta && (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => onNavigate?.(classified.cta!.navigateTo)}
-                className="cursor-pointer"
-              >
-                {classified.cta.label}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Happy path: list (no error) */}
-      {!initialLoad && !error && (
+      {/* Happy path: list (no error or with cached sessions) */}
+      {!initialLoad && (!error || sessions.length > 0) && (
         <RemoteSessionsList
           rows={sessions}
           loading={loading}
