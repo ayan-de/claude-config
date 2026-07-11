@@ -220,6 +220,7 @@ pub fn github_set_path_mapping_cmd(
     state: tauri::State<'_, AppState>,
     original_path: String,
     local_path: String,
+    slug: Option<String>,
 ) -> AppResult<()> {
     let original = original_path.trim();
     let local = local_path.trim();
@@ -231,8 +232,16 @@ pub fn github_set_path_mapping_cmd(
     let path = mappings_path(&state);
     let mut m = storage::load_path_mappings(&path)?;
     m.version = 1;
+    // Canonical key: original decoded path.
     m.mappings
         .insert(original.to_string(), local.to_string());
+    // Slug-keyed lookup so download resolvers hit without re-prompting.
+    if let Some(s) = slug {
+        let s = s.trim();
+        if !s.is_empty() {
+            m.slug_mappings.insert(s.to_string(), local.to_string());
+        }
+    }
     storage::save_path_mappings(&path, &m)?;
     Ok(())
 }
