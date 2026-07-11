@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-11
+
+### Added
+- **Remote sessions** — full download pipeline: `github_list_remote_sessions`, `github_download_session_cmd` with conflict detection, `fetch_remote_transcript` for previews
+- **Local/Remote tabs** — `SessionsView` splits into Local and Remote panes with `RemoteSessionsTab`, `ProjectPickerModal`, and `RemoteSessionsModal`
+- **RemoteSessionDetail preview** — in-app transcript viewer before downloading a remote session
+- **Sync action classification** — every remote row shows one of four states: `download`, `update`, `conflict`, `in-sync`; conflicts surface `AppError::SessionDownloadConflict`
+- **Session index population** — `sessions-index.json` carries title, message count, and project metadata so the Remote pane is usable without re-fetching
+- **Slug mapping** — `ProjectPathMapping` carries a slug and `slug_mappings` map lets the resolver route remote sessions to the right local project
+- **SHA-gated remote list** — list endpoint takes a tree SHA and returns only the changed slugs, avoiding full re-fetches
+- **GitHub response caches** — in-memory + on-disk cache layer with stale-while-revalidate and Shift-refresh on the Remote tab
+- **Always-mounted panes** — Local and Remote panes stay mounted to make switching tabs instant
+- **ErrorBoundary** — reusable `ErrorBoundary` component with loader + retry in the Remote tab
+- **b64 line-wrapping** — `b64_decode` handles GitHub's wrapped base64 payloads
+
+### Changed
+- GitHub session commands converted to async with improved error handling in `RemoteSessionsTab`
+- `GitHubTopBarButton` simplified; unused state removed
+- Session sync state reclassifies in real time as remote/local state changes
+
+### Fixed
+- `upsert_into_sessions_index` now uses the sidecar lock so concurrent writers don't clobber each other
+- Uploaded sessions use the real title extracted from JSONL instead of the placeholder
+
 ## [0.7.0] - 2026-07-10
 
 ### Added

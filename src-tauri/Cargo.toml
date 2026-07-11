@@ -1,6 +1,6 @@
 [package]
 name = "claude-config"
-version = "0.7.0"
+version = "0.8.0"
 description = "Claude Config — cross-platform provider manager for Claude Code"
 authors = ["claude-config contributors"]
 license = "MIT"
