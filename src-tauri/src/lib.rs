@@ -114,6 +114,7 @@ pub fn run() {
             commands::github_sync::github_list_remote_sessions_cmd,
             commands::github_sync::github_resolve_download_target_cmd,
             commands::github_sync::github_download_session_cmd,
+            commands::github_sync::github_fetch_remote_transcript_cmd,
             commands::github_sync::github_list_local_projects_cmd,
             commands::github_sync::github_get_session_sync_state_cmd,
             commands::github_sync::github_check_session_sync_status_cmd,
