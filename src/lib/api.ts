@@ -336,3 +336,8 @@ export const githubDownloadSession = (
 /** List existing local Claude Code project folders for the picker. */
 export const githubListLocalProjects = () =>
   call<string[]>("github_list_local_projects_cmd");
+
+// ---------- github sync (Phase 3: preview) ----------
+
+export const githubFetchRemoteTranscript = (sessionId: string, blobSha: string) =>
+  call<SessionMessage[]>("github_fetch_remote_transcript_cmd", { sessionId, blobSha });
