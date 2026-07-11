@@ -339,6 +339,12 @@ pub enum AppError {
     #[error("GitHub sync not configured: {0}")]
     GitHubNotConfigured(String),
 
+    #[error("session download conflict: {kind:?} for {session_id}")]
+    SessionDownloadConflict {
+        kind: SessionConflictKind,
+        session_id: String,
+    },
+
     #[error("Internal: {0}")]
     Internal(String),
 }
@@ -359,6 +365,7 @@ impl AppError {
             AppError::GitHub { .. } => "github_api",
             AppError::GitHubAuthRequired => "github_auth_required",
             AppError::GitHubNotConfigured(_) => "github_not_configured",
+            AppError::SessionDownloadConflict { .. } => "session_download_conflict",
             AppError::Internal(_) => "internal",
         }
     }
@@ -533,6 +540,21 @@ pub struct RemoteSessionEntry {
     pub message_count: u32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionConflictKind {
+    RemoteNewer,
+    LocalNewer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadResult {
+    pub session_id: String,
+    pub full_path: String,
+    pub sync_state: SyncState,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +725,19 @@ mod tests {
         let m: ProjectPathMappings = serde_json::from_str(json).unwrap();
         assert!(m.slug_mappings.is_empty());
         assert_eq!(m.mappings.get("/home/foo").map(|s| s.as_str()), Some("/home/bar"));
+    }
+
+    #[test]
+    fn session_download_conflict_serializes_kind_in_message() {
+        let err = AppError::SessionDownloadConflict {
+            kind: SessionConflictKind::RemoteNewer,
+            session_id: "abc-123".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        // Custom Serialize impl flattens to {kind, message}; the
+        // conflict kind and session id live in the message string.
+        assert!(json.contains("\"kind\":\"session_download_conflict\""));
+        assert!(json.contains("RemoteNewer"));
+        assert!(json.contains("abc-123"));
     }
 }
