@@ -1,18 +1,19 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { RemoteSessionSummary } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { RemoteSessionSummary, SyncAction } from "@/lib/types";
 
 interface Props {
   rows: RemoteSessionSummary[];
-  /** Called when the user clicks the Download button. */
+  /** Called when the user clicks the per-row Download/Update button. */
   onDownload: (row: RemoteSessionSummary) => void;
   /**
-   * Optional: when provided, clicking the row body (NOT the Download
+   * Optional: when provided, clicking the row body (NOT the action
    * button) calls this. Use this for the Remote tab's inline preview.
-   * The Download button still calls onDownload.
+   * The action button still calls onDownload.
    * `expandedRowId` highlights which row is currently expanded.
    */
   onPreview?: (row: RemoteSessionSummary) => void;
@@ -89,9 +90,10 @@ export function RemoteSessionsList({
                             {r.modified ?? "—"} · {r.messageCount} msgs
                           </div>
                         </Body>
-                        <Button size="sm" onClick={() => onDownload(r)}>
-                          Download
-                        </Button>
+                        <SyncActionButton
+                          action={r.syncAction}
+                          onClick={() => onDownload(r)}
+                        />
                       </li>
                     );
                   })}
@@ -103,4 +105,56 @@ export function RemoteSessionsList({
       )}
     </div>
   );
+}
+
+/**
+ * Renders the four states of `row.syncAction` as a single button. The
+ * `Conflict` variant keeps the same verb ("Update") as `Update` because
+ * the visual affordance is the amber border, not a different label —
+ * clicking routes through the existing `SessionDownloadConflict` confirm
+ * dialog via `useRemoteSessions.download()`.
+ */
+function SyncActionButton({
+  action,
+  onClick,
+}: {
+  action: SyncAction;
+  onClick: () => void;
+}) {
+  switch (action) {
+    case "download":
+      return (
+        <Button size="sm" onClick={onClick}>
+          Download
+        </Button>
+      );
+    case "update":
+      return (
+        <Button size="sm" onClick={onClick}>
+          Update
+        </Button>
+      );
+    case "conflict":
+      return (
+        <Button
+          size="sm"
+          onClick={onClick}
+          title="This session has local changes since last upload — click to review"
+          className={cn(
+            "border-amber-500/60 text-amber-700 hover:bg-amber-500/10",
+            "dark:text-amber-400 dark:hover:bg-amber-500/10",
+          )}
+          variant="default"
+        >
+          Update
+        </Button>
+      );
+    case "in_sync":
+      return (
+        <Button size="sm" variant="ghost" disabled aria-label="Already synced">
+          <CheckCircle2 className="size-3 text-emerald-500" />
+          Synced
+        </Button>
+      );
+  }
 }

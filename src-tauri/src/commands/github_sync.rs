@@ -27,7 +27,7 @@ use crate::models::{
     AppError, AppResult, GITHUB_KEYRING_ACCOUNT, GitHubAuthSecret, GitHubDeviceFlowStart,
     GitHubSyncConfig, ProjectPathMapping, ProjectPathMappings, ProjectRemoteMetadata,
     ProviderSecret, RemoteSessionEntry, RemoteSessionSummary, SessionSyncMetadata,
-    SessionSyncStateFile, SyncState,
+    SessionSyncStateFile, SyncAction, SyncState,
 };
 use crate::state::AppState;
 use crate::storage::sessions::PROJECTS_DIR;
@@ -58,6 +58,101 @@ fn sync_config_path(state: &AppState) -> PathBuf {
 
 fn mappings_path(state: &AppState) -> PathBuf {
     storage::path_mappings_path(state.app_data_dir.as_ref())
+}
+
+/// Insert/update the `slug_mappings` entry for `slug`. Idempotent: a
+/// second upload for the same slug that already has this exact local
+/// folder is a no-op (we skip the write to avoid churning the file).
+/// Called from `github_upload_session_cmd` so the same machine recognises
+/// its own uploads without first needing a cross-machine download to
+/// seed the map.
+fn ensure_slug_mapping(
+    map_path: &Path,
+    slug: &str,
+    local_folder: &str,
+) -> AppResult<()> {
+    let mut m = storage::load_path_mappings(map_path)?;
+    if m.slug_mappings.get(slug).map(String::as_str) == Some(local_folder) {
+        return Ok(());
+    }
+    m.slug_mappings
+        .insert(slug.to_string(), local_folder.to_string());
+    m.version = 1;
+    storage::save_path_mappings(map_path, &m)
+}
+
+/// Populate `sync_action` on every row by comparing each row's blob SHA
+/// against the per-session `remote_sha` stored locally, and the on-disk
+/// transcript mtime against `last_local_modified`. Pure function of
+/// `rows` + `mappings` + the local filesystem — no GitHub calls.
+///
+/// Runs after the list build (both the SHA-gate cache-hit path and the
+/// fresh tree-walk path) so the in-memory cache write-back and the
+/// returned rows carry identical `sync_action` values.
+///
+/// File-existence guard is performed *before* the state-file lookup so a
+/// stale entry in `session_sync_state.json` cannot mis-classify a
+/// deleted-locally session as `InSync`.
+fn annotate_sync_actions(rows: &mut [RemoteSessionSummary], mappings: &ProjectPathMappings) {
+    use std::collections::HashMap;
+
+    // Bucket rows by slug in one pass so each per-project session_sync_state.json
+    // is loaded exactly once. We collect owned slug strings to avoid a
+    // borrow of `rows` outliving the iteration — we need `&mut` access
+    // to `rows` again inside the loop body.
+    let mut by_slug: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, row) in rows.iter().enumerate() {
+        by_slug
+            .entry(row.project_slug.clone())
+            .or_default()
+            .push(idx);
+    }
+
+    for (slug, idxs) in by_slug {
+        let Some(local_folder) = mappings.slug_mappings.get(&slug) else {
+            // No mapping on this machine → nothing local. Every row in
+            // this slug is a first-time pull.
+            for i in idxs {
+                rows[i].sync_action = SyncAction::Download;
+            }
+            continue;
+        };
+        let state_path = storage::session_sync_state_path(std::path::Path::new(local_folder));
+        let state_file = match storage::load_session_sync_state(&state_path) {
+            Ok(f) => f,
+            Err(e) => {
+                // Treat IO/parse failures as "no entry" so the UI shows
+                // Download — never panic, never block the tab.
+                log::warn!(
+                    "annotate_sync_actions: skipping state file at {}: {e}",
+                    state_path.display()
+                );
+                for i in idxs {
+                    rows[i].sync_action = SyncAction::Download;
+                }
+                continue;
+            }
+        };
+
+        for i in idxs {
+            let (session_id, remote_sha) = (rows[i].session_id.clone(), rows[i].sha.clone());
+            let jsonl =
+                std::path::Path::new(local_folder).join(format!("{session_id}.jsonl"));
+            if !jsonl.exists() {
+                rows[i].sync_action = SyncAction::Download;
+                continue;
+            }
+            let current_mtime = std::fs::metadata(&jsonl)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let local = state_file.sessions.get(&session_id);
+            rows[i].sync_action =
+                storage::classify_sync_action(local, &remote_sha, current_mtime);
+        }
+    }
 }
 
 /// Resolve `(owner, default_branch)` for the connected sync repo, hitting
@@ -483,6 +578,20 @@ pub fn github_upload_session_cmd(
         .insert(session_id.clone(), sync_meta.clone());
     storage::write_session_sync_state_atomic(&state_path, &state_file)?;
 
+    // Auto-populate the slug → local-folder mapping so the Remote tab
+    // can see this machine's own uploads as `InSync` without forcing the
+    // user to first download from another machine to seed the map. The
+    // existing download path already populates `slug_mappings`; this
+    // makes upload do the same.
+    let map_path = mappings_path(&state);
+    if let Err(e) = ensure_slug_mapping(&map_path, &slug, &project_folder.display().to_string())
+    {
+        // Non-fatal: the upload itself already succeeded; log and move on.
+        log::warn!(
+            "upload succeeded but slug mapping upsert failed for {slug}: {e}"
+        );
+    }
+
     // Record the last successful sync on the global config.
     cfg.last_sync = Some(now);
     storage::save_github_sync_config(&cfg_path, &cfg)?;
@@ -652,6 +761,11 @@ pub async fn github_list_remote_sessions_cmd(
             c.default_branch = Some(repo.default_branch.clone());
         }
 
+        // Path mappings are needed in both the cache-hit and fresh paths
+        // below — pull them once.
+        let mappings =
+            storage::load_path_mappings(&storage::path_mappings_path(state.app_data_dir.as_ref()))?;
+
         // SHA gate: 1 call. If the ref SHA matches our cache, return
         // the cached list verbatim and we're done.
         let current_ref_sha =
@@ -663,7 +777,13 @@ pub async fn github_list_remote_sessions_cmd(
         };
         if let (Some(cached_sha), Some(cached_list)) = (cached_sha, cached_list) {
             if Some(&cached_sha) == current_ref_sha.as_ref() {
-                return Ok(cached_list);
+                // Local state may have moved since this list was cached
+                // (e.g. the user uploaded from another app instance).
+                // Re-annotate before returning so the button labels stay
+                // accurate even when remote SHA hasn't shifted.
+                let mut rows = cached_list;
+                annotate_sync_actions(&mut rows, &mappings);
+                return Ok(rows);
             }
         }
 
@@ -675,7 +795,7 @@ pub async fn github_list_remote_sessions_cmd(
             (c.sessions_list.clone(), c.tree.clone())
         };
         let diff = gh_repo::diff_slugs(previous_tree.as_ref(), &tree);
-        let rows = gh_repo::list_remote_sessions_with_diff(
+        let mut rows = gh_repo::list_remote_sessions_with_diff(
             token,
             &owner,
             &cfg.repo_name,
@@ -685,9 +805,13 @@ pub async fn github_list_remote_sessions_cmd(
         )
         .map_err(map_gh)?;
 
+        annotate_sync_actions(&mut rows, &mappings);
+
         // Write-back the cache. Note: we persist the *current* tree,
         // not a transformed one, so the next diff has the same source
-        // format (paths + SHAs).
+        // format (paths + SHAs). Cache the *annotated* rows so the
+        // SHA-gate warm path on the next call only re-annotates
+        // (cheaper than re-fetching the tree).
         {
             let mut c = state.github_cache.lock().expect("github_cache poisoned");
             c.tree = Some(tree);
@@ -1015,6 +1139,217 @@ mod tests {
             slug_from_full_path(&p).unwrap(),
             "-home-ayan_de-Projects-my-project"
         );
+    }
+
+    #[test]
+    fn ensure_slug_mapping_first_call_writes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let map_path = storage::path_mappings_path(dir.path());
+        ensure_slug_mapping(&map_path, "-home-foo", "/home/foo/project").unwrap();
+        let loaded = storage::load_path_mappings(&map_path).unwrap();
+        assert_eq!(
+            loaded.slug_mappings.get("-home-foo").map(String::as_str),
+            Some("/home/foo/project")
+        );
+        assert!(loaded.mappings.is_empty());
+    }
+
+    #[test]
+    fn ensure_slug_mapping_idempotent_when_local_folder_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let map_path = storage::path_mappings_path(dir.path());
+        ensure_slug_mapping(&map_path, "-home-foo", "/home/foo/project").unwrap();
+        let mtime_before = std::fs::metadata(&map_path).unwrap().modified().unwrap();
+        // Sleep so mtime is observably different — 100ms is plenty on
+        // every filesystem this runs on.
+        std::thread::sleep(std::time::Duration::from_millis(110));
+        ensure_slug_mapping(&map_path, "-home-foo", "/home/foo/project").unwrap();
+        let mtime_after = std::fs::metadata(&map_path).unwrap().modified().unwrap();
+        assert_eq!(
+            mtime_before, mtime_after,
+            "second call with same args must skip the write"
+        );
+    }
+
+    #[test]
+    fn ensure_slug_mapping_updates_when_local_folder_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let map_path = storage::path_mappings_path(dir.path());
+        ensure_slug_mapping(&map_path, "-home-foo", "/home/foo/project").unwrap();
+        ensure_slug_mapping(&map_path, "-home-foo", "/home/foo/project-v2").unwrap();
+        let loaded = storage::load_path_mappings(&map_path).unwrap();
+        assert_eq!(
+            loaded.slug_mappings.get("-home-foo").map(String::as_str),
+            Some("/home/foo/project-v2")
+        );
+    }
+
+    /// Helper: write `<folder>/<id>.jsonl` with mtime set to a deterministic
+    /// instant so we can also write `last_local_modified: same` (for the
+    /// InSync/Update cases) or `last_local_modified: other` (for Conflict).
+    fn write_session_file(
+        folder: &std::path::Path,
+        session_id: &str,
+        bytes: &[u8],
+        mtime: std::time::SystemTime,
+    ) {
+        std::fs::write(folder.join(format!("{session_id}.jsonl")), bytes).unwrap();
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(folder.join(format!("{session_id}.jsonl")))
+            .unwrap();
+        f.set_modified(mtime).unwrap();
+    }
+
+    fn row(slug: &str, id: &str, sha: &str) -> RemoteSessionSummary {
+        RemoteSessionSummary {
+            session_id: id.into(),
+            project_slug: slug.into(),
+            original_path: String::new(),
+            title: None,
+            modified: None,
+            message_count: 0,
+            sha: sha.into(),
+            sync_action: SyncAction::default(),
+        }
+    }
+
+    fn write_state(folder: &std::path::Path, entries: &[(&str, &str)]) {
+        let mut sessions = std::collections::HashMap::new();
+        for (id, sha) in entries {
+            sessions.insert(
+                (*id).to_string(),
+                SessionSyncMetadata {
+                    last_uploaded: Some("2026-07-09T00:00:00Z".into()),
+                    remote_sha: Some((*sha).into()),
+                    last_local_modified: Some("2026-07-09T00:00:00Z".into()),
+                    sync_state: SyncState::Synced,
+                },
+            );
+        }
+        let state = SessionSyncStateFile {
+            version: 1,
+            sessions,
+        };
+        storage::write_session_sync_state_atomic(
+            &storage::session_sync_state_path(folder),
+            &state,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn annotate_no_mapping_is_download() {
+        let mut rows = vec![row("-home-foo", "uuid-1", "deadbeef".repeat(10).as_str())];
+        let mappings = ProjectPathMappings::default();
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::Download);
+    }
+
+    #[test]
+    fn annotate_mapping_but_no_state_file_is_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path();
+        let mut mappings = ProjectPathMappings::default();
+        mappings
+            .slug_mappings
+            .insert("-home-foo".into(), local.display().to_string());
+        let mut rows = vec![row("-home-foo", "uuid-1", "deadbeef".repeat(10).as_str())];
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::Download);
+    }
+
+    #[test]
+    fn annotate_matching_sha_with_file_is_in_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path();
+        let stored_ts = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(
+                chrono::DateTime::parse_from_rfc3339("2026-07-09T00:00:00Z")
+                    .unwrap()
+                    .timestamp() as u64,
+            );
+        let sha = format!("{}", "a".repeat(40));
+        write_session_file(local, "uuid-1", b"{}", stored_ts);
+        write_state(local, &[("uuid-1", &sha)]);
+
+        let mut mappings = ProjectPathMappings::default();
+        mappings
+            .slug_mappings
+            .insert("-home-foo".into(), local.display().to_string());
+        let mut rows = vec![row("-home-foo", "uuid-1", &sha)];
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::InSync);
+    }
+
+    #[test]
+    fn annotate_sha_differs_mtime_matches_is_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path();
+        let stored_ts = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(
+                chrono::DateTime::parse_from_rfc3339("2026-07-09T00:00:00Z")
+                    .unwrap()
+                    .timestamp() as u64,
+            );
+        let stored_sha = format!("{}", "a".repeat(40));
+        let remote_sha = format!("{}", "b".repeat(40));
+        write_session_file(local, "uuid-1", b"{}", stored_ts);
+        write_state(local, &[("uuid-1", &stored_sha)]);
+
+        let mut mappings = ProjectPathMappings::default();
+        mappings
+            .slug_mappings
+            .insert("-home-foo".into(), local.display().to_string());
+        let mut rows = vec![row("-home-foo", "uuid-1", &remote_sha)];
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::Update);
+    }
+
+    #[test]
+    fn annotate_sha_differs_mtime_changed_is_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path();
+        let stored_ts = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(
+                chrono::DateTime::parse_from_rfc3339("2026-07-09T00:00:00Z")
+                    .unwrap()
+                    .timestamp() as u64,
+            );
+        let local_edit_ts = stored_ts + std::time::Duration::from_secs(3600);
+        let stored_sha = format!("{}", "a".repeat(40));
+        let remote_sha = format!("{}", "b".repeat(40));
+        write_session_file(local, "uuid-1", b"{}", local_edit_ts);
+        write_state(local, &[("uuid-1", &stored_sha)]);
+
+        let mut mappings = ProjectPathMappings::default();
+        mappings
+            .slug_mappings
+            .insert("-home-foo".into(), local.display().to_string());
+        let mut rows = vec![row("-home-foo", "uuid-1", &remote_sha)];
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::Conflict);
+    }
+
+    #[test]
+    fn annotate_matching_sha_with_file_absent_is_download() {
+        // Regression: a stale session_sync_state.json entry with a
+        // matching SHA must NOT classify a deleted-locally session as
+        // InSync. The file-existence guard in annotate_sync_actions
+        // forces Download regardless of what the state file says.
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path();
+        let sha = format!("{}", "a".repeat(40));
+        // state file exists with a matching remote_sha...
+        write_state(local, &[("uuid-1", &sha)]);
+        // ...but the .jsonl itself is absent.
+        let mut mappings = ProjectPathMappings::default();
+        mappings
+            .slug_mappings
+            .insert("-home-foo".into(), local.display().to_string());
+        let mut rows = vec![row("-home-foo", "uuid-1", &sha)];
+        annotate_sync_actions(&mut rows, &mappings);
+        assert_eq!(rows[0].sync_action, SyncAction::Download);
     }
 
     #[test]

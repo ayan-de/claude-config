@@ -195,7 +195,7 @@ All in `src-tauri/src/commands/github_sync.rs` (currently **21 commands**, up fr
 14. `github_check_session_sync_status_cmd(session_id, full_path) -> SyncState` — single-row reclassification
 
 **Remote list / download / preview (4)**
-15. `github_list_remote_sessions_cmd() -> Vec<RemoteSessionSummary>` — **async**, SHA-gated (see `Caching Layer`)
+15. `github_list_remote_sessions_cmd() -> Vec<RemoteSessionSummary>` — **async**, SHA-gated (see `Caching Layer`). Each returned row carries a populated `sync_action: SyncAction` field (`Download` | `Update` | `Conflict` | `InSync`) computed by `annotate_sync_actions` from local filesystem state — no extra GitHub calls. Re-annotated on every return, including the SHA-gate warm-cache path.
 16. `github_resolve_download_target_cmd(project_slug) -> Option<String>` — slug-keyed lookup; `None` triggers the picker
 17. `github_download_session_cmd(session_id, project_slug, blob_sha, force?) -> DownloadResult` — runs conflict check against per-project `metadata.json`, writes via temp + fsync + atomic rename, registers with `sessions-index.json`
 18. `github_fetch_remote_transcript_cmd(session_id, blob_sha) -> Vec<SessionMessage>` — preview without disk write; uses `tempfile::NamedTempFile` only because `parse_session_transcript` takes a `&Path`
@@ -329,7 +329,7 @@ The Sessions tab has a `SessionsTabs` Local/Remote control (`src/components/Sess
 
 - `SessionsTabs.tsx` — Local/Remote segmented control
 - `RemoteSessionsTab.tsx` — Remote pane: toolbar (count + Refresh button) + initial-load spinner / not-connected CTA / cached-data-with-error banner / list / detail. Uses `useRemoteSessions` for state, `ErrorBoundary` for the detail, and a custom `RemoteSessionsError` class with a `cta` field so the boundary's fallback can deep-link the user to GitHub Sync settings on auth-required errors
-- `RemoteSessionsList.tsx` — extracted, reused by `RemoteSessionsTab` and `RemoteSessionsModal`
+- `RemoteSessionsList.tsx` — extracted, reused by `RemoteSessionsTab` and `RemoteSessionsModal`. Renders an internal `SyncActionButton` for the per-row action, switching on `row.syncAction` (Download / Update / amber-border Conflict / disabled InSync).
 - `RemoteSessionDetail.tsx` — per-row preview pane (lazy-loaded messages via `github_fetch_remote_transcript_cmd`)
 - `RemoteSessionsModal.tsx` — sibling download surface still opened from some legacy call sites
 - `ProjectPickerModal.tsx` — dropdown of `github_list_local_projects_cmd` results + "create new" file picker + "remember this mapping" checkbox
@@ -372,6 +372,23 @@ The Sessions tab has a `SessionsTabs` Local/Remote control (`src/components/Sess
 ### On Upload Click (Out of Sync)
 No separate confirmation — clicking the amber icon uploads directly. UI changes color as soon as the next `get_session_sync_state_cmd` round-trip lands.
 
+### On Download — per-row action classification
+
+`github_list_remote_sessions_cmd` populates a `sync_action` field on every returned row before it ever reaches the UI. The classifier (`annotate_sync_actions` in `commands/github_sync.rs`) is a pure filesystem read against local state — it runs on both the SHA-gate warm-cache path and the fresh-tree path so the in-memory cache and the returned rows always agree, and it costs zero GitHub API calls.
+
+Four states:
+
+| Local state | Remote state | `sync_action` | Button UX |
+|---|---|---|---|
+| No `slug_mappings` entry, or mapping but no `session_sync_state.json`, or stored `remote_sha: None` | present | `Download` | primary, "Download" |
+| Entry present, **and** `.jsonl` exists on disk, `local.remote_sha == remote.sha` | present | `InSync` | disabled, "Synced" with checkmark |
+| Entry present, file exists, SHAs differ, mtime matches `last_local_modified` | present | `Update` | primary, "Update" |
+| Entry present, file exists, SHAs differ, mtime differs from `last_local_modified` | present | `Conflict` | primary with amber border, "Update"; click triggers the existing `SessionDownloadConflict` confirm |
+
+A stale `session_sync_state.json` entry for a deleted `.jsonl` falls into the first row (the file-existence guard runs before the state-file lookup).
+
+The download flow itself is unchanged from the bullet list below; this section just describes how the button label + style are derived.
+
 ### On Download
 1. `useRemoteSessions.download()` checks if `lastRefreshAt > 60s` old → invalidate + refetch
 2. Re-check the row still exists with same SHA in the fresh list (catches upstream delete)
@@ -401,7 +418,7 @@ No separate confirmation — clicking the amber icon uploads directly. UI change
 - `src/components/Sessions.tsx` — Local/Remote tabs, SessionGroup legend, lazy-loaded Remote pane
 - `src/components/SessionsTabs.tsx` — Local/Remote segmented control
 - `src/components/RemoteSessionsTab.tsx` — Remote pane (toolbar, list, detail, error classification)
-- `src/components/RemoteSessionsList.tsx` — extracted row list (reused by tab + modal)
+- `src/components/RemoteSessionsList.tsx` — extracted row list (reused by tab + modal) with internal `SyncActionButton` rendering the four `SyncAction` variants
 - `src/components/RemoteSessionDetail.tsx` — per-row preview with messages
 - `src/components/RemoteSessionsModal.tsx` — sibling download surface (legacy call sites)
 - `src/components/ProjectPickerModal.tsx` — local-project dropdown + file picker

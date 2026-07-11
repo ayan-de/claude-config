@@ -18,7 +18,7 @@ import type {
   SessionMessage,
 } from "@/lib/types";
 
-const CACHE_KEY = "remoteSessions:v1";
+const CACHE_KEY = "remoteSessions:v2";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Force a fresh list before any download if the last refresh was older than this. */
 const STALE_BEFORE_DOWNLOAD_MS = 60_000;

@@ -23,7 +23,7 @@ use tempfile::NamedTempFile;
 
 use crate::models::{
     AppError, AppResult, GitHubSyncConfig, ProjectPathMapping, ProjectPathMappings,
-    SessionSyncMetadata, SessionSyncStateFile, SyncState,
+    SessionSyncMetadata, SessionSyncStateFile, SyncAction, SyncState,
 };
 
 const GITHUB_SYNC_FILENAME: &str = "github_sync.json";
@@ -196,6 +196,48 @@ fn parse_rfc3339_to_unix(s: &str) -> Option<i64> {
         .map(|d| d.timestamp())
 }
 
+/// Decide what the Remote tab's download button should do for a row.
+///
+/// Called from `annotate_sync_actions` *after* the caller has already
+/// confirmed the transcript file exists on disk — that guard belongs
+/// upstream so a stale entry in `session_sync_state.json` can't trap a
+/// deleted file as `InSync`.
+///
+/// Decision order:
+/// 1. `local` is `None` → `Download` (never synced).
+/// 2. `local.remote_sha` is `None` → `Download` (can't compare).
+/// 3. Stored SHA matches the remote row's SHA → `InSync` (nothing to pull).
+/// 4. SHAs differ; defer to `classify_sync_state`. `Synced` (local
+///    mtime matches `last_local_modified`) → safe `Update`. `OutOfSync`
+///    → `Conflict` — including the "missing anchor timestamp" case,
+///    which already routes to `OutOfSync` upstream.
+/// 5. `NeverUploaded` here is unreachable because both preconditions
+///    above already guarantee `local` is `Some` with a known `remote_sha`;
+///    treat it as `Download` defensively.
+///
+/// The `current_mtime` argument is in Unix seconds, matching
+/// `classify_sync_state` so callers don't need to pre-format.
+pub fn classify_sync_action(
+    local: Option<&SessionSyncMetadata>,
+    remote_sha: &str,
+    current_mtime: i64,
+) -> SyncAction {
+    let Some(meta) = local else {
+        return SyncAction::Download;
+    };
+    let Some(stored_sha) = meta.remote_sha.as_ref() else {
+        return SyncAction::Download;
+    };
+    if stored_sha == remote_sha {
+        return SyncAction::InSync;
+    }
+    match classify_sync_state(local, current_mtime) {
+        SyncState::Synced => SyncAction::Update,
+        SyncState::OutOfSync => SyncAction::Conflict,
+        SyncState::NeverUploaded => SyncAction::Download,
+    }
+}
+
 // ---------------- internal helpers ----------------
 
 fn write_json_atomic(path: &Path, value: &Value) -> AppResult<()> {
@@ -276,6 +318,65 @@ mod tests {
         assert_eq!(
             classify_sync_state(Some(&m), stored_ts + 3600),
             SyncState::OutOfSync
+        );
+    }
+
+    fn synced_meta_for(remote_sha: &str) -> SessionSyncMetadata {
+        SessionSyncMetadata {
+            last_uploaded: Some("2026-07-09T00:00:00Z".into()),
+            remote_sha: Some(remote_sha.into()),
+            last_local_modified: Some("2026-07-09T00:00:00Z".into()),
+            sync_state: SyncState::Synced,
+        }
+    }
+
+    #[test]
+    fn classify_sync_action_download_when_no_local_entry() {
+        assert_eq!(
+            classify_sync_action(None, "abc", 1_000_000),
+            SyncAction::Download
+        );
+    }
+
+    #[test]
+    fn classify_sync_action_download_when_remote_sha_missing() {
+        let m = SessionSyncMetadata {
+            remote_sha: None,
+            ..synced_meta_for("abc")
+        };
+        assert_eq!(
+            classify_sync_action(Some(&m), "abc", 1_000_000),
+            SyncAction::Download
+        );
+    }
+
+    #[test]
+    fn classify_sync_action_in_sync_when_shas_match() {
+        let stored_ts = parse_rfc3339_to_unix("2026-07-09T00:00:00Z").unwrap();
+        let m = synced_meta_for("abc");
+        assert_eq!(
+            classify_sync_action(Some(&m), "abc", stored_ts),
+            SyncAction::InSync
+        );
+    }
+
+    #[test]
+    fn classify_sync_action_update_when_shas_differ_but_local_unchanged() {
+        let stored_ts = parse_rfc3339_to_unix("2026-07-09T00:00:00Z").unwrap();
+        let m = synced_meta_for("old");
+        assert_eq!(
+            classify_sync_action(Some(&m), "new", stored_ts),
+            SyncAction::Update
+        );
+    }
+
+    #[test]
+    fn classify_sync_action_conflict_when_shas_differ_and_local_changed() {
+        let stored_ts = parse_rfc3339_to_unix("2026-07-09T00:00:00Z").unwrap();
+        let m = synced_meta_for("old");
+        assert_eq!(
+            classify_sync_action(Some(&m), "new", stored_ts + 3600),
+            SyncAction::Conflict
         );
     }
 

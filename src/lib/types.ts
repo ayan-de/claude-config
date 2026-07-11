@@ -462,7 +462,15 @@ export interface RemoteSessionSummary {
   modified: string | null;
   messageCount: number;
   sha: string;
+  /** What the download button does for this row on this machine.
+   *  Populated by the backend `annotate_sync_actions`. Defaults to
+   *  "download" for any cached payload written before Phase 4. */
+  syncAction: SyncAction;
 }
+
+/** Per-row action for the Remote tab's download button. Mirrors
+ *  `SyncAction` in `src-tauri/src/models.rs`. */
+export type SyncAction = "download" | "update" | "conflict" | "in_sync";
 
 /**
  * Discriminant for a download conflict error. Frontend parses this

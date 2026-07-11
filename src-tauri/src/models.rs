@@ -460,6 +460,37 @@ pub struct RemoteSessionSummary {
     pub modified: Option<String>,
     pub message_count: u32,
     pub sha: String,
+    /// What the download button should do for this row *on this machine*.
+    /// `#[serde(default)]` so old serialized rows (or rows produced by a
+    /// `github_list_remote_sessions_cmd` caller that hasn't been updated)
+    /// deserialize as `Download` rather than something else — the
+    /// pre-Phase-4 wiring always showed Download anyway.
+    #[serde(default)]
+    pub sync_action: SyncAction,
+}
+
+/// Per-row action the Remote tab's download button renders. Populated by
+/// `annotate_sync_actions` from local filesystem state — never computed
+/// on the frontend.
+///
+/// `Update` means "safe pull, no local edits since last upload" — clicking
+/// does not prompt. `Conflict` means "both sides changed" — clicking shows
+/// the existing `SessionDownloadConflict` confirm dialog. `InSync` is
+/// disabled. `Download` is the first-pull case (no local file or no
+/// stored `remote_sha` to compare against).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncAction {
+    Download,
+    Update,
+    Conflict,
+    InSync,
+}
+
+impl Default for SyncAction {
+    fn default() -> Self {
+        SyncAction::Download
+    }
 }
 
 /// Maps an original project path (where the session was created) to a
@@ -739,5 +770,24 @@ mod tests {
         assert!(json.contains("\"kind\":\"session_download_conflict\""));
         assert!(json.contains("RemoteNewer"));
         assert!(json.contains("abc-123"));
+    }
+
+    #[test]
+    fn remote_session_summary_missing_sync_action_defaults_to_download() {
+        // Regression: pre-Phase-4 cached payloads (or any JSON emitted by
+        // a non-updated backend) have no `syncAction` field. The `#[serde(default)]`
+        // attribute + `Default for SyncAction` must produce Download, not panic
+        // and not surface InSync by accident.
+        let raw = r#"{
+            "sessionId": "abc",
+            "projectSlug": "-home-foo",
+            "originalPath": "/home/foo",
+            "title": null,
+            "modified": null,
+            "messageCount": 0,
+            "sha": "0123456789abcdef0123456789abcdef01234567"
+        }"#;
+        let s: RemoteSessionSummary = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.sync_action, SyncAction::Download);
     }
 }

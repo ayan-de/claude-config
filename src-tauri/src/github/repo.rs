@@ -400,6 +400,11 @@ pub fn tree_to_remote_sessions(tree: &Tree, slug_for: impl Fn(&str) -> Option<St
                 modified: None,
                 message_count: 0,
                 sha: e.sha.clone(),
+                // Provisional default. `github_list_remote_sessions_cmd`
+                // (commands/github_sync.rs) calls `annotate_sync_actions`
+                // on the full row vector before returning, so this gets
+                // rewritten to Download/Update/Conflict/InSync per row.
+                sync_action: crate::models::SyncAction::default(),
             })
         })
         .collect()
@@ -855,6 +860,7 @@ mod tests {
                 modified: None,
                 message_count: 0,
                 sha: "a".repeat(40),
+                sync_action: crate::models::SyncAction::Download,
             },
             RemoteSessionSummary {
                 session_id: "uuid-2".into(),
@@ -864,6 +870,7 @@ mod tests {
                 modified: None,
                 message_count: 0,
                 sha: "b".repeat(40),
+                sync_action: crate::models::SyncAction::Download,
             },
         ];
         let new = tree_with(&["sessions/-home-bar/uuid-2.jsonl"]);
