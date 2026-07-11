@@ -31,6 +31,8 @@ import {
 } from "@/hooks/SessionUploadContext";
 import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { deleteSession } from "@/lib/api";
+import { RemoteSessionsTab } from "@/components/RemoteSessionsTab";
+import { SessionsTabs } from "@/components/SessionsTabs";
 import type { SessionSummary, SyncState } from "@/lib/types";
 import type {
   GlobalTabProps,
@@ -88,13 +90,14 @@ const UNGROUPED_KEY = "__ungrouped__";
  * pagination handled before. Per-group pagination when a single
  * project has hundreds of sessions — re-add if it shows up.
  */
-export function SessionsView({ onClose }: GlobalTabProps) {
+export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
   const { sessions, loading, refresh } = useSessions();
   const { config } = useGitHubSyncContext();
   const { stateById, uploadingIds, upload, seed } = useSessionUpload(sessions);
   const [selected, setSelected] = useState<SessionSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [activeTab, setActiveTab] = useState<"local" | "remote">("local");
 
   const onConfirmDelete = async () => {
     const target = deleteTarget;
@@ -138,6 +141,35 @@ export function SessionsView({ onClose }: GlobalTabProps) {
     );
   }
 
+  if (activeTab === "remote") {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              <ArrowLeft className="size-3.5" />
+            </Button>
+            <History className="size-4 text-primary" />
+            <div>
+              <h2 className="text-sm font-semibold leading-none">Sessions</h2>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Claude Code conversations stored on this PC. Click a row to
+                read the transcript.
+              </p>
+            </div>
+          </div>
+          <SessionsTabs active={activeTab} onChange={setActiveTab} />
+        </div>
+        <RemoteSessionsTab
+          onDownloaded={async () => {
+            await refresh();
+          }}
+          onNavigate={onNavigate}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
@@ -154,21 +186,24 @@ export function SessionsView({ onClose }: GlobalTabProps) {
             </p>
           </div>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void refresh()}
-          disabled={loading}
-          aria-label="Refresh sessions list"
-          className="cursor-pointer"
-        >
-          {loading ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="size-3.5" />
-          )}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <SessionsTabs active={activeTab} onChange={setActiveTab} />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void refresh()}
+            disabled={loading}
+            aria-label="Refresh sessions list"
+            className="cursor-pointer"
+          >
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {initialLoad ? (

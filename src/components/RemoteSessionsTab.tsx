@@ -9,13 +9,16 @@ import { useRemoteSessions } from "@/hooks/useRemoteSessions";
 import { RemoteSessionsList } from "@/components/RemoteSessionsList";
 import { RemoteSessionDetail } from "@/components/RemoteSessionDetail";
 import type { RemoteSessionSummary } from "@/lib/types";
+import type { GlobalTabId } from "@/data/globalTabs";
 
 interface Props {
   /** Called after a successful download so the parent can refresh local sessions. */
   onDownloaded: () => void;
+  /** Optional: jump to the GitHub Sync tab when the user clicks "Connect GitHub". */
+  onNavigate?: (id: GlobalTabId) => void;
 }
 
-export function RemoteSessionsTab({ onDownloaded }: Props) {
+export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
   const { config } = useGitHubSyncContext();
   const { sessions, loading, error, refresh, download, transcripts, loadTranscript } =
     useRemoteSessions();
@@ -64,6 +67,14 @@ export function RemoteSessionsTab({ onDownloaded }: Props) {
           Remote sessions are stored in a private GitHub repo. Connect your account
           in Settings to browse and download them.
         </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-4 cursor-pointer"
+          onClick={() => onNavigate?.("github-sync")}
+        >
+          Connect GitHub
+        </Button>
       </div>
     );
   }

@@ -196,7 +196,7 @@ function PageShell() {
 
         <Main
           mode={providers.mode}
-          panel={{ activeTab, closeTab: panel.close }}
+          panel={{ activeTab, closeTab: panel.close, openTab: panel.openTab }}
           providers={providers.providers}
           activeProvider={providers.active}
           loadingProviderId={providers.loadingId}

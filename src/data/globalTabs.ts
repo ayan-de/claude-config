@@ -38,6 +38,12 @@ import { UsageSidebarButton, UsageView } from "@/components/Usage";
 export interface GlobalTabProps {
   /** Called when the tab wants to close itself (e.g. Cancel / back button). */
   onClose: () => void;
+  /**
+   * Optional: navigate to another global tab. Used by the Remote pane of
+   * the Sessions view to send the user to GitHub Sync settings when
+   * GitHub isn't connected. Older tabs ignore this.
+   */
+  onNavigate?: (id: GlobalTabId) => void;
 }
 
 /**

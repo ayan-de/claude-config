@@ -7,7 +7,7 @@ import { KeyringWarning } from "@/components/KeyringWarning";
 import { ProviderForm } from "@/components/ProviderForm";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import type { GlobalTab } from "@/data/globalTabs";
+import type { GlobalTab, GlobalTabId } from "@/data/globalTabs";
 import type { KeyringStatus, Provider, ProviderInput } from "@/lib/types";
 import { kindLabel, providerSubtitle } from "@/lib/utils-app";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 export interface MainPanel {
   activeTab: GlobalTab | null;
   closeTab: () => void;
+  openTab: (id: GlobalTabId) => void;
 }
 
 interface Props {
@@ -172,7 +173,10 @@ export function Main({
           )}
 
           {panel.activeTab ? (
-            <panel.activeTab.Component onClose={panel.closeTab} />
+            <panel.activeTab.Component
+              onClose={panel.closeTab}
+              onNavigate={panel.openTab}
+            />
           ) : showForm ? (
             <ProviderForm
               key={editingProvider?.id ?? "new"}
