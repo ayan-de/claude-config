@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ProjectPickerModal } from "@/components/ProjectPickerModal";
+import { RemoteSessionsList } from "@/components/RemoteSessionsList";
 import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { useRemoteSessions } from "@/hooks/useRemoteSessions";
 import type { RemoteSessionSummary } from "@/lib/types";
@@ -32,13 +33,6 @@ export function RemoteSessionsModal({ open, onClose, onDownloaded }: Props) {
 
   if (!open) return null;
 
-  const groups = new Map<string, RemoteSessionSummary[]>();
-  for (const s of sessions) {
-    const arr = groups.get(s.projectSlug) ?? [];
-    arr.push(s);
-    groups.set(s.projectSlug, arr);
-  }
-
   const handleDownload = (row: RemoteSessionSummary) => {
     void download(row, {
       onNeedPicker: () =>
@@ -47,9 +41,7 @@ export function RemoteSessionsModal({ open, onClose, onDownloaded }: Props) {
           originalPath: row.originalPath,
           pendingRow: row,
         }),
-      onDone: () => {
-        onDownloaded();
-      },
+      onDone: () => onDownloaded(),
     });
   };
 
@@ -82,49 +74,13 @@ export function RemoteSessionsModal({ open, onClose, onDownloaded }: Props) {
           </p>
         )}
 
-        {config.isConnected && sessions.length === 0 && !loading && !error && (
-          <p className="p-4 text-xs text-muted-foreground">
-            No remote sessions yet.
-          </p>
-        )}
-
-        {loading && (
-          <div className="flex justify-center p-4">
-            <Loader2 className="size-4 animate-spin" />
-          </div>
-        )}
-
-        {error && <p className="p-4 text-xs text-destructive">{error}</p>}
-
-        <div className="overflow-auto px-4 py-2">
-          {[...groups.entries()].map(([slug, rows]) => (
-            <section key={slug} className="mb-4">
-              <h3 className="text-[11px] font-medium text-muted-foreground">
-                {slug}
-              </h3>
-              <ul className="divide-y">
-                {rows.map((r) => (
-                  <li
-                    key={r.sessionId}
-                    className="flex items-center justify-between py-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-xs">
-                        {r.title ?? r.sessionId.slice(0, 8)}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {r.modified ?? "—"} · {r.messageCount} msgs
-                      </div>
-                    </div>
-                    <Button size="sm" onClick={() => handleDownload(r)}>
-                      Download
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <RemoteSessionsList
+          rows={sessions}
+          loading={loading}
+          error={error}
+          onDownload={handleDownload}
+          emptyMessage="No remote sessions yet."
+        />
       </div>
 
       {picker && (
@@ -136,17 +92,13 @@ export function RemoteSessionsModal({ open, onClose, onDownloaded }: Props) {
           onPicked={() => {
             const row = picker.pendingRow;
             setPicker(null);
-            // Retry the download after the mapping is persisted.
             void download(row, {
-              onNeedPicker: () => {
-                // Should never fire on the retry since we just set the
-                // mapping, but if it does the modal reopens gracefully.
+              onNeedPicker: () =>
                 setPicker({
                   slug: row.projectSlug,
                   originalPath: row.originalPath,
                   pendingRow: row,
-                });
-              },
+                }),
               onDone: () => onDownloaded(),
             });
           }}
