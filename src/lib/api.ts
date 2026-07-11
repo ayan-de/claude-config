@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  DownloadResult,
   GitHubDeviceFlowStart,
   GitHubPollOutcome,
   GitHubSyncConfig,
@@ -12,6 +13,7 @@ import type {
   ProjectPathMapping,
   Provider,
   ProviderInput,
+  RemoteSessionSummary,
   RepoProbeResult,
   SessionMessage,
   SessionSummary,
@@ -254,8 +256,12 @@ export const githubSetRepoName = (repoName: string) =>
 export const githubGetPathMappings = () =>
   call<ProjectPathMapping[]>("github_get_path_mappings_cmd");
 
-export const githubSetPathMapping = (originalPath: string, localPath: string) =>
-  call<void>("github_set_path_mapping_cmd", { originalPath, localPath });
+export const githubSetPathMapping = (
+  originalPath: string,
+  localPath: string,
+  slug?: string,
+) =>
+  call<void>("github_set_path_mapping_cmd", { originalPath, localPath, slug });
 
 export const githubRemovePathMapping = (originalPath: string) =>
   call<void>("github_remove_path_mapping_cmd", { originalPath });
@@ -302,3 +308,31 @@ export const githubCheckSessionSyncStatus = (
     sessionId,
     fullPath,
   });
+
+// ---------- github sync (Phase 3: download) ----------
+
+/** List every session in the GitHub sync repo, grouped by project. */
+export const githubListRemoteSessions = () =>
+  call<RemoteSessionSummary[]>("github_list_remote_sessions_cmd");
+
+/** Resolve the local target folder for a remote project slug. */
+export const githubResolveDownloadTarget = (projectSlug: string) =>
+  call<string | null>("github_resolve_download_target_cmd", { projectSlug });
+
+/** Download one session; force=true bypasses conflict detection. */
+export const githubDownloadSession = (
+  sessionId: string,
+  projectSlug: string,
+  blobSha: string,
+  force?: boolean,
+) =>
+  call<DownloadResult>("github_download_session_cmd", {
+    sessionId,
+    projectSlug,
+    blobSha,
+    force,
+  });
+
+/** List existing local Claude Code project folders for the picker. */
+export const githubListLocalProjects = () =>
+  call<string[]>("github_list_local_projects_cmd");
