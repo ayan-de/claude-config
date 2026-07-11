@@ -6,12 +6,14 @@ import { toast } from "sonner";
 import {
   AppError,
   githubDownloadSession,
+  githubFetchRemoteTranscript,
   githubListRemoteSessions,
   githubResolveDownloadTarget,
 } from "@/lib/api";
 import type {
   DownloadResult,
   RemoteSessionSummary,
+  SessionMessage,
 } from "@/lib/types";
 
 interface DownloadCallbacks {
@@ -23,6 +25,12 @@ interface DownloadCallbacks {
 
 interface State {
   sessions: RemoteSessionSummary[];
+  loading: boolean;
+  error: string | null;
+}
+
+interface TranscriptState {
+  messages: SessionMessage[] | null;
   loading: boolean;
   error: string | null;
 }
@@ -112,5 +120,64 @@ export function useRemoteSessions() {
     [doDownload],
   );
 
-  return { ...state, refresh, download };
+  // Per-row transcript cache. Looked up by `sessionId`; populated lazily
+  // by `loadTranscript` when the user opens a row in the Remote tab.
+  const [transcripts, setTranscripts] = useState<Map<string, TranscriptState>>(
+    () => new Map(),
+  );
+  // In-flight promises live alongside the state map so duplicate
+  // `loadTranscript` calls for the same id share a single fetch.
+  const inFlightRef = useRef<Map<string, Promise<SessionMessage[] | null>>>(
+    new Map(),
+  );
+  const loadTranscript = useCallback(
+    async (row: RemoteSessionSummary): Promise<SessionMessage[] | null> => {
+      const id = row.sessionId;
+      const cached = transcripts.get(id);
+      // Already resolved — return cached messages.
+      if (cached && cached.messages !== null) {
+        return cached.messages;
+      }
+      // In flight — await the existing promise so concurrent callers
+      // share a single fetch.
+      if (cached && cached.loading) {
+        const existing = inFlightRef.current.get(id);
+        if (existing) return existing;
+      }
+      setTranscripts((prev) => {
+        const next = new Map(prev);
+        next.set(id, { messages: null, loading: true, error: null });
+        return next;
+      });
+      const promise = (async (): Promise<SessionMessage[] | null> => {
+        try {
+          const messages = await githubFetchRemoteTranscript(
+            row.sessionId,
+            row.sha,
+          );
+          setTranscripts((prev) => {
+            const next = new Map(prev);
+            next.set(id, { messages, loading: false, error: null });
+            return next;
+          });
+          return messages;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          setTranscripts((prev) => {
+            const next = new Map(prev);
+            next.set(id, { messages: null, loading: false, error: message });
+            return next;
+          });
+          return null;
+        } finally {
+          inFlightRef.current.delete(id);
+        }
+      })();
+      inFlightRef.current.set(id, promise);
+      return promise;
+    },
+    [transcripts],
+  );
+
+  return { ...state, refresh, download, transcripts, loadTranscript };
 }
