@@ -410,6 +410,10 @@ export type GitHubPollOutcome =
 export interface ProjectPathMapping {
   originalPath: string;
   localPath: string;
+  /** Project slug from the GitHub sync repo (last path segment of the
+   *  canonical project folder). Optional — populated by Phase 3
+   *  `github_set_path_mapping_cmd` when a slug is known, else omitted. */
+  slug?: string;
 }
 
 /** Result of `github_check_repo_cmd` — used to validate Phase 2 setup. */
@@ -437,3 +441,21 @@ export interface SessionSyncStateFile {
   version: number;
   sessions: Record<string, SessionSyncMetadata>;
 }
+
+/** Returned by `github_download_session_cmd` on success. Mirrors
+ *  `DownloadResult` in `src-tauri/src/models.rs`. The local JSONL has
+ *  been written and `sessions-index.json` upserted; `syncState` is
+ *  always `"synced"` for a freshly downloaded session. */
+export interface DownloadResult {
+  sessionId: string;
+  fullPath: string;
+  syncState: SyncState;
+}
+
+/**
+ * Discriminant for a download conflict error. Frontend parses this
+ * from the AppError.message string (backend serializes the variant's
+ * Display impl into `message`; `kind` at the top level is always
+ * `"session_download_conflict"`).
+ */
+export type SessionConflictKind = "remote_newer" | "local_newer";
