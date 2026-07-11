@@ -9,7 +9,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use crate::github::client::{b64_decode, b64_encode, GitHubClient, GitHubError, GITHUB_API_BASE};
-use crate::models::RemoteSessionSummary;
+use crate::models::{ProjectRemoteMetadata, RemoteSessionSummary};
 
 pub const DEFAULT_REPO_DESCRIPTION: &str =
     "Claude Code session transcripts synced from claude-config. Private — do not share.";
@@ -374,6 +374,68 @@ pub fn tree_to_remote_sessions(tree: &Tree, slug_for: impl Fn(&str) -> Option<St
         .collect()
 }
 
+/// Fetch a `metadata.json` blob for a project slug and decode it.
+/// A missing metadata.json (HTTP 404) returns the default empty
+/// metadata so callers can still proceed without it.
+pub fn fetch_project_metadata(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    blob_sha: &str,
+) -> Result<ProjectRemoteMetadata, GitHubError> {
+    match get_blob(token, owner, repo, blob_sha) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_default()),
+        Err(GitHubError::Http { status: 404, .. }) => Ok(ProjectRemoteMetadata::default()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Like `tree_to_remote_sessions`, but fills in `title`, `modified`,
+/// `message_count`, and `original_path` by fetching each project's
+/// `metadata.json` blob. One extra HTTP round-trip per project —
+/// acceptable for v3 since projects are few and metadata.json blobs are
+/// tiny.
+pub fn list_remote_sessions(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    default_branch: &str,
+) -> Result<Vec<RemoteSessionSummary>, GitHubError> {
+    let tree = get_tree_recursive(token, owner, repo, default_branch)?;
+    let mut rows = tree_to_remote_sessions(&tree, |_| None);
+
+    let mut meta_shas: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for entry in &tree.tree {
+        if entry.entry_type != "blob" {
+            continue;
+        }
+        let parts: Vec<&str> = entry.path.split('/').collect();
+        if parts.len() == 3 && parts[0] == "sessions" && parts[2] == "metadata.json" {
+            meta_shas.insert(parts[1].to_string(), entry.sha.clone());
+        }
+    }
+
+    for (slug, sha) in &meta_shas {
+        let meta = fetch_project_metadata(token, owner, repo, sha)?;
+        for row in rows.iter_mut().filter(|r| &r.project_slug == slug) {
+            row.original_path = meta.original_path.clone();
+            if let Some(session_entry) = meta.sessions.get(&row.session_id) {
+                row.title = session_entry.title.clone();
+                row.modified = session_entry.modified.clone();
+                row.message_count = session_entry.message_count;
+            }
+        }
+    }
+
+    rows.sort_by(|a, b| {
+        a.project_slug
+            .cmp(&b.project_slug)
+            .then_with(|| b.modified.cmp(&a.modified))
+    });
+    Ok(rows)
+}
+
 /// Encode JSON content as base64 for storage in blob API requests.
 pub fn encode_blob_content(content: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(content)
@@ -430,5 +492,35 @@ mod tests {
             b.commit.unwrap().sha,
             "abcdef1234567890abcdef1234567890abcdef12"
         );
+    }
+
+    // ---- list_remote_sessions ----
+
+    fn sample_tree_with_two_projects() -> Tree {
+        let json = r#"{
+            "sha": "root",
+            "url": "x",
+            "tree": [
+                {"path": "manifest.json", "mode": "100644", "type": "blob", "sha": "m", "size": 0, "url": "x"},
+                {"path": "sessions/-home-foo/uuid-1.jsonl", "mode": "100644", "type": "blob", "sha": "b1", "size": 10, "url": "x"},
+                {"path": "sessions/-home-foo/uuid-2.jsonl", "mode": "100644", "type": "blob", "sha": "b2", "size": 10, "url": "x"},
+                {"path": "sessions/-home-foo/metadata.json", "mode": "100644", "type": "blob", "sha": "metafoo", "size": 10, "url": "x"},
+                {"path": "sessions/-home-bar/uuid-3.jsonl", "mode": "100644", "type": "blob", "sha": "b3", "size": 10, "url": "x"},
+                {"path": "sessions/-home-bar/metadata.json", "mode": "100644", "type": "blob", "sha": "metabar", "size": 10, "url": "x"}
+            ],
+            "truncated": false
+        }"#;
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn tree_walk_skips_manifest_and_metadata_blobs() {
+        let tree = sample_tree_with_two_projects();
+        let bare = tree_to_remote_sessions(&tree, |_| None);
+        assert_eq!(bare.len(), 3);
+        let ids: Vec<&str> = bare.iter().map(|r| r.session_id.as_str()).collect();
+        assert!(ids.contains(&"uuid-1"));
+        assert!(ids.contains(&"uuid-2"));
+        assert!(ids.contains(&"uuid-3"));
     }
 }
