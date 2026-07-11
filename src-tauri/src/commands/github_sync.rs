@@ -30,7 +30,7 @@ use crate::models::{
 };
 use crate::state::AppState;
 use crate::storage::sessions::PROJECTS_DIR;
-use crate::storage::{discover_claude_dir, github_sync as storage};
+use crate::storage::{discover_claude_dir, github_sync as storage, SessionMessage};
 
 /// Largest session we'll upload. GitHub's hard blob limit is 100 MB;
 /// base64 inflates payloads ~33%, so we cap the raw file well under it.
@@ -721,6 +721,46 @@ pub fn github_download_session_cmd(
         full_path: target_jsonl.display().to_string(),
         sync_state: SyncState::Synced,
     })
+}
+
+/// Fetch a remote session transcript from the GitHub sync repo, decode it,
+/// and return the parsed `SessionMessage` list so the frontend can render
+/// a preview without downloading the file to disk. The bytes are written
+/// to a `NamedTempFile` solely because `parse_session_transcript` takes a
+/// `&Path`; the temp file is auto-deleted when this scope returns.
+#[tauri::command]
+pub fn github_fetch_remote_transcript_cmd(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    blob_sha: String,
+) -> AppResult<Vec<SessionMessage>> {
+    let cfg = storage::load_github_sync_config(&sync_config_path(&state))?;
+    if !cfg.is_connected {
+        return Err(AppError::GitHubNotConfigured("not_connected".into()));
+    }
+    let secret = load_github_token(&state)?;
+    let token = &secret.access_token;
+    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+
+    // Probe the repo — distinguish "never uploaded" (no repo) from
+    // "blob_sha stale/missing" (blob fetch error) by failing fast here.
+    let _repo = gh_repo::get_repo(token, &owner, &cfg.repo_name)
+        .map_err(map_gh)?
+        .ok_or_else(|| AppError::Validation("sync repo does not exist".into()))?;
+
+    let bytes = gh_repo::get_blob(token, &owner, &cfg.repo_name, &blob_sha).map_err(map_gh)?;
+    let tmp = tempfile::NamedTempFile::new()?;
+    std::fs::write(tmp.path(), &bytes)?;
+
+    // Reuse the exact same parser the local-file path uses. Don't
+    // duplicate the JSONL parsing logic — it lives in the storage layer.
+    let messages = crate::storage::sessions::parse_session_transcript(tmp.path())?;
+
+    // `session_id` and `blob_sha` are accepted by the signature for future
+    // use (e.g. caching, telemetry) but the current parser only needs the
+    // file bytes. Drop the temp on scope exit.
+    let _ = (session_id, blob_sha);
+    Ok(messages)
 }
 
 fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
