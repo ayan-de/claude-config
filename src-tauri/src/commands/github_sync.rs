@@ -425,13 +425,43 @@ pub fn github_upload_session_cmd(
 /// Return the full per-project sync-state map. `project_folder` is the
 /// on-disk directory that holds the transcripts (parent of the `.jsonl`).
 /// The sessions list calls this once per project to color every row.
+///
+/// The `sync_state` field on each entry is re-classified against the
+/// transcript's current on-disk mtime before returning, so a session
+/// that was edited after its last upload flips to `OutOfSync` without
+/// waiting for the next upload. The persisted value is only ever
+/// authoritative right after an upload; anything downstream must trust
+/// this recomputed view.
 #[tauri::command]
 pub fn github_get_session_sync_state_cmd(
     _state: tauri::State<'_, AppState>,
     project_folder: String,
 ) -> AppResult<SessionSyncStateFile> {
-    let path = storage::session_sync_state_path(Path::new(&project_folder));
-    storage::load_session_sync_state(&path)
+    let folder = PathBuf::from(&project_folder);
+    let path = storage::session_sync_state_path(&folder);
+    let file = storage::load_session_sync_state(&path)?;
+    Ok(reclassify_state_file(&folder, file))
+}
+
+/// Recompute every entry's `sync_state` against the transcript's
+/// current on-disk mtime. Extracted so the reclassification is
+/// unit-testable without a Tauri state harness.
+fn reclassify_state_file(
+    project_folder: &Path,
+    mut file: SessionSyncStateFile,
+) -> SessionSyncStateFile {
+    for (session_id, meta) in file.sessions.iter_mut() {
+        let jsonl = project_folder.join(format!("{session_id}.jsonl"));
+        let current_mtime = std::fs::metadata(&jsonl)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let fresh = storage::classify_sync_state(Some(&*meta), current_mtime);
+        meta.sync_state = fresh;
+    }
+    file
 }
 
 /// Re-classify a single session by comparing its current on-disk mtime
@@ -557,5 +587,89 @@ mod tests {
         // No parent directory component -> validation error rather than a
         // silently-wrong empty slug.
         assert!(slug_from_full_path(&p).is_err());
+    }
+
+    // ---- reclassify_state_file ----
+
+    fn make_state_file(session_id: &str, last_local_modified: &str) -> SessionSyncStateFile {
+        let mut file = SessionSyncStateFile::default();
+        file.version = 1;
+        file.sessions.insert(
+            session_id.to_string(),
+            SessionSyncMetadata {
+                last_uploaded: Some("2026-07-09T00:00:00Z".into()),
+                remote_sha: Some("deadbeef".into()),
+                last_local_modified: Some(last_local_modified.into()),
+                // Persisted value is deliberately stale — the reclassify
+                // step should overwrite it based on real mtime.
+                sync_state: SyncState::Synced,
+            },
+        );
+        file
+    }
+
+    fn write_transcript(dir: &Path, session_id: &str) -> PathBuf {
+        let p = dir.join(format!("{session_id}.jsonl"));
+        std::fs::write(&p, b"{}\n").unwrap();
+        p
+    }
+
+    fn file_mtime_rfc3339(p: &Path) -> String {
+        let meta = std::fs::metadata(p).unwrap();
+        let secs = meta
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        DateTime::<Utc>::from_timestamp(secs, 0)
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    #[test]
+    fn reclassify_flips_synced_to_out_of_sync_when_mtime_drifts() {
+        // File on disk has whatever mtime the OS gave it; we lie in the
+        // metadata by claiming the last upload captured an mtime an hour
+        // earlier. Reclassify must notice and flip the row to amber even
+        // though the persisted `sync_state` still says Synced.
+        let tmp = tempfile::tempdir().unwrap();
+        let session_id = "abc-uuid";
+        write_transcript(tmp.path(), session_id);
+        let file = make_state_file(session_id, "2020-01-01T00:00:00Z");
+
+        let reclassified = reclassify_state_file(tmp.path(), file);
+        let entry = reclassified.sessions.get(session_id).unwrap();
+        assert_eq!(entry.sync_state, SyncState::OutOfSync);
+    }
+
+    #[test]
+    fn reclassify_keeps_synced_when_mtime_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_id = "abc-uuid";
+        let path = write_transcript(tmp.path(), session_id);
+        // Pull the real mtime off disk so classify_sync_state's <=1s
+        // tolerance is satisfied without touching the filesystem clock.
+        let mtime = file_mtime_rfc3339(&path);
+        let file = make_state_file(session_id, &mtime);
+
+        let reclassified = reclassify_state_file(tmp.path(), file);
+        let entry = reclassified.sessions.get(session_id).unwrap();
+        assert_eq!(entry.sync_state, SyncState::Synced);
+    }
+
+    #[test]
+    fn reclassify_reports_out_of_sync_when_transcript_is_missing() {
+        // A transcript that vanished (user moved the file / renamed the
+        // project) should not silently keep the green icon.
+        let tmp = tempfile::tempdir().unwrap();
+        let session_id = "missing-uuid";
+        let file = make_state_file(session_id, "2026-07-09T00:00:00Z");
+
+        let reclassified = reclassify_state_file(tmp.path(), file);
+        let entry = reclassified.sessions.get(session_id).unwrap();
+        // Missing file -> current_mtime falls to 0 -> classify returns
+        // OutOfSync (mtimes disagree).
+        assert_eq!(entry.sync_state, SyncState::OutOfSync);
     }
 }
