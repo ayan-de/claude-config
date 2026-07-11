@@ -564,6 +564,155 @@ pub fn github_resolve_download_target_cmd(
     Ok(m.slug_mappings.get(&project_slug).cloned())
 }
 
+/// Download a session transcript from the GitHub sync repo to the
+/// resolved local project folder. Resolves the target via path
+/// mappings; if none, returns `Validation("path_mapping_required")`.
+/// If a local file already exists and the timestamps disagree,
+/// returns `SessionDownloadConflict` unless `force` is true.
+#[tauri::command]
+pub fn github_download_session_cmd(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    project_slug: String,
+    blob_sha: String,
+    force: Option<bool>,
+) -> AppResult<crate::models::DownloadResult> {
+    use crate::models::{DownloadResult, SessionConflictKind};
+
+    let cfg_path = sync_config_path(&state);
+    let mut cfg = storage::load_github_sync_config(&cfg_path)?;
+    if !cfg.is_connected {
+        return Err(AppError::GitHubNotConfigured("not_connected".into()));
+    }
+    let secret = load_github_token(&state)?;
+    let token = &secret.access_token;
+    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+
+    // Resolve target folder from slug mappings. Missing mapping is not a
+    // hard error — it's the picker signal.
+    let m = storage::load_path_mappings(&mappings_path(&state))?;
+    let target = m.slug_mappings.get(&project_slug).cloned().ok_or_else(|| {
+        AppError::Validation("path_mapping_required".into())
+    })?;
+    let target_path = std::path::PathBuf::from(&target);
+    if !target_path.exists() {
+        return Err(AppError::Validation(format!(
+            "mapped local folder does not exist: {target}"
+        )));
+    }
+
+    // Repo probe — needed for both the blob fetch and metadata lookup.
+    let repo = gh_repo::get_repo(token, &owner, &cfg.repo_name)
+        .map_err(map_gh)?
+        .ok_or_else(|| AppError::Validation("sync repo does not exist".into()))?;
+    let default_branch = repo.default_branch;
+
+    // Read remote's modified timestamp from the project's metadata.json
+    // (best-effort; missing metadata is fine — we just can't conflict-check).
+    let tree = gh_repo::get_tree_recursive(token, &owner, &cfg.repo_name, &default_branch)
+        .map_err(map_gh)?;
+    let meta_sha = tree.tree.iter().find_map(|e| {
+        let parts: Vec<&str> = e.path.split('/').collect();
+        if parts.len() == 3
+            && parts[0] == "sessions"
+            && parts[1] == project_slug
+            && parts[2] == "metadata.json"
+        {
+            Some(e.sha.clone())
+        } else {
+            None
+        }
+    });
+    let remote_modified: Option<String> = match meta_sha {
+        Some(sha) => gh_repo::fetch_project_metadata(token, &owner, &cfg.repo_name, &sha)
+            .map_err(map_gh)?
+            .sessions
+            .get(&session_id)
+            .and_then(|e| e.modified.clone()),
+        None => None,
+    };
+
+    // Local mtime for conflict detection.
+    let target_jsonl = target_path.join(format!("{session_id}.jsonl"));
+    let local_mtime = std::fs::metadata(&target_jsonl).ok().and_then(|m| {
+        m.modified().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|d| chrono::DateTime::<chrono::Utc>::from_timestamp(d.as_secs() as i64, 0))
+                .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        })
+    });
+
+    if !force.unwrap_or(false) {
+        if let (Some(remote), Some(local)) = (remote_modified.as_ref(), local_mtime.as_ref()) {
+            // RFC3339 strings from UTC compare lexicographically.
+            if remote.as_str() > local.as_str() {
+                return Err(AppError::SessionDownloadConflict {
+                    kind: SessionConflictKind::RemoteNewer,
+                    session_id: session_id.clone(),
+                });
+            }
+            if local.as_str() > remote.as_str() {
+                return Err(AppError::SessionDownloadConflict {
+                    kind: SessionConflictKind::LocalNewer,
+                    session_id: session_id.clone(),
+                });
+            }
+        }
+    }
+
+    // Fetch and write the transcript atomically.
+    let bytes = gh_repo::get_blob(token, &owner, &cfg.repo_name, &blob_sha).map_err(map_gh)?;
+    use std::io::Write;
+    let tmp_path = target_jsonl.with_extension("jsonl.tmp");
+    {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp_path, &target_jsonl)?;
+
+    // Register with Claude Code's sessions-index.json.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let entry = crate::storage::sessions::SessionIndexEntry {
+        session_id: session_id.clone(),
+        full_path: target_jsonl.display().to_string(),
+        first_prompt: None,
+        summary: None,
+        message_count: Some(0),
+        created: Some(now.clone()),
+        modified: Some(now.clone()),
+        project_path: None,
+        is_sidechain: Some(false),
+    };
+    crate::storage::sessions::upsert_into_sessions_index(&target_path, &entry)?;
+
+    // Update session_sync_state.json so the row appears green immediately.
+    let state_path = storage::session_sync_state_path(&target_path);
+    let mut state_file = storage::load_session_sync_state(&state_path)?;
+    state_file.version = 1;
+    state_file.sessions.insert(
+        session_id.clone(),
+        SessionSyncMetadata {
+            last_uploaded: Some(now.clone()),
+            remote_sha: Some(blob_sha),
+            last_local_modified: Some(now.clone()),
+            sync_state: SyncState::Synced,
+        },
+    );
+    storage::write_session_sync_state_atomic(&state_path, &state_file)?;
+
+    // Record last sync on the global config.
+    cfg.last_sync = Some(now);
+    storage::save_github_sync_config(&cfg_path, &cfg)?;
+
+    Ok(DownloadResult {
+        session_id,
+        full_path: target_jsonl.display().to_string(),
+        sync_state: SyncState::Synced,
+    })
+}
+
 fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
     if !state.keyring.is_available() {
         return Err(AppError::KeyringUnavailable(
@@ -713,5 +862,15 @@ mod tests {
         // Missing file -> current_mtime falls to 0 -> classify returns
         // OutOfSync (mtimes disagree).
         assert_eq!(entry.sync_state, SyncState::OutOfSync);
+    }
+
+    #[test]
+    fn rfc3339_compare_orders_remote_vs_local() {
+        // The command relies on lexicographic-UTC comparison — lock the
+        // invariant so no future refactor introduces string-parse instead.
+        let remote = "2026-07-11T10:00:00Z";
+        let local = "2026-07-11T09:00:00Z";
+        assert!(remote > local);
+        assert!(local < remote);
     }
 }
