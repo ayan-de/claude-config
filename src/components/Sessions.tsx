@@ -200,7 +200,7 @@ export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
         </div>
       </div>
 
-      <div className={activeTab === "local" ? "" : "hidden"}>
+      <div className={cn("flex flex-col gap-4", activeTab === "local" ? "" : "hidden")}>
         {initialLoad ? (
         <div className="rounded-lg border bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground">
           Loading sessions…
