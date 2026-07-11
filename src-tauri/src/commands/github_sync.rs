@@ -29,7 +29,8 @@ use crate::models::{
     SessionSyncStateFile, SyncState,
 };
 use crate::state::AppState;
-use crate::storage::github_sync as storage;
+use crate::storage::sessions::PROJECTS_DIR;
+use crate::storage::{discover_claude_dir, github_sync as storage};
 
 /// Largest session we'll upload. GitHub's hard blob limit is 100 MB;
 /// base64 inflates payloads ~33%, so we cap the raw file well under it.
@@ -754,6 +755,28 @@ fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
 // Keep this trait-bound reference so the type is referenced.
 #[allow(dead_code)]
 fn _types_used(_: ProjectPathMappings, _: GitHubSyncConfig) {}
+
+/// Return the absolute paths of every local Claude Code project folder
+/// (`<claude_dir>/projects/*/`). Feeds the ProjectPickerModal dropdown.
+#[tauri::command]
+pub fn github_list_local_projects_cmd(
+    _state: tauri::State<'_, AppState>,
+) -> AppResult<Vec<String>> {
+    let projects_dir = discover_claude_dir().join(PROJECTS_DIR);
+    if !projects_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&projects_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            out.push(path.display().to_string());
+        }
+    }
+    out.sort();
+    Ok(out)
+}
 
 #[cfg(test)]
 mod tests {
