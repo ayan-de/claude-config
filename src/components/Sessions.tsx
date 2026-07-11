@@ -141,35 +141,6 @@ export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
     );
   }
 
-  if (activeTab === "remote") {
-    return (
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              <ArrowLeft className="size-3.5" />
-            </Button>
-            <History className="size-4 text-primary" />
-            <div>
-              <h2 className="text-sm font-semibold leading-none">Sessions</h2>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Claude Code conversations stored on this PC. Click a row to
-                read the transcript.
-              </p>
-            </div>
-          </div>
-          <SessionsTabs active={activeTab} onChange={setActiveTab} />
-        </div>
-        <RemoteSessionsTab
-          onDownloaded={async () => {
-            await refresh();
-          }}
-          onNavigate={onNavigate}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
@@ -181,32 +152,36 @@ export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
           <div>
             <h2 className="text-sm font-semibold leading-none">Sessions</h2>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Claude Code conversations stored on this PC. Click a row to
-              read the transcript.
+              {activeTab === "local"
+                ? "Claude Code conversations stored on this PC. Click a row to read the transcript."
+                : "Sessions synced to your private GitHub repo. Click a row to preview."}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <SessionsTabs active={activeTab} onChange={setActiveTab} />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void refresh()}
-            disabled={loading}
-            aria-label="Refresh sessions list"
-            className="cursor-pointer"
-          >
-            {loading ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="size-3.5" />
-            )}
-            Refresh
-          </Button>
+          {activeTab === "local" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void refresh()}
+              disabled={loading}
+              aria-label="Refresh sessions list"
+              className="cursor-pointer"
+            >
+              {loading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              Refresh
+            </Button>
+          )}
         </div>
       </div>
 
-      {initialLoad ? (
+      <div className={activeTab === "local" ? "" : "hidden"}>
+        {initialLoad ? (
         <div className="rounded-lg border bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground">
           Loading sessions…
         </div>
@@ -260,6 +235,16 @@ export function SessionsView({ onClose, onNavigate }: GlobalTabProps) {
           {groups.length} project{groups.length === 1 ? "" : "s"}
         </p>
       )}
+      </div>
+
+      <div className={activeTab === "remote" ? "" : "hidden"}>
+        <RemoteSessionsTab
+          onDownloaded={async () => {
+            await refresh();
+          }}
+          onNavigate={onNavigate}
+        />
+      </div>
 
       <SessionDeleteDialog
         open={!!deleteTarget}

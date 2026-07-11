@@ -44,7 +44,7 @@ type DoDownload = (
 export function useRemoteSessions() {
   const [state, setState] = useState<State>({
     sessions: [],
-    loading: false,
+    loading: true,
     error: null,
   });
 
