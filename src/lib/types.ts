@@ -452,6 +452,18 @@ export interface DownloadResult {
   syncState: SyncState;
 }
 
+/** One row in the remote sessions list shown by the Phase 3 modal.
+ *  Mirrors `RemoteSessionSummary` in `src-tauri/src/models.rs`. */
+export interface RemoteSessionSummary {
+  sessionId: string;
+  projectSlug: string;
+  originalPath: string;
+  title: string | null;
+  modified: string | null;
+  messageCount: number;
+  sha: string;
+}
+
 /**
  * Discriminant for a download conflict error. Frontend parses this
  * from the AppError.message string (backend serializes the variant's
