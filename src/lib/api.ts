@@ -341,3 +341,13 @@ export const githubListLocalProjects = () =>
 
 export const githubFetchRemoteTranscript = (sessionId: string, blobSha: string) =>
   call<SessionMessage[]>("github_fetch_remote_transcript_cmd", { sessionId, blobSha });
+
+/** Drop the in-memory remote-list cache so the next list call refetches. */
+export const githubInvalidateRemoteCache = () =>
+  call<void>("github_invalidate_remote_cache_cmd");
+
+/** Return blob-cache size + file count for a future settings-page UI. */
+export const githubGetBlobCacheStats = () =>
+  call<{ fileCount: number; totalBytes: number }>(
+    "github_get_blob_cache_stats_cmd",
+  );

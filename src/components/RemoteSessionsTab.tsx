@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -35,12 +35,9 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
     useRemoteSessions();
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
-  // Auto-refresh when the tab mounts (similar to the modal's behavior).
-  useEffect(() => {
-    void refresh();
-    // We want this to run once on mount — refresh identity is stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The hook's own mount effect handles the initial refresh — including
+// the localStorage-seeded instant-paint + background reconcile path.
+  // (No useEffect needed here anymore.)
 
   const expandedRow = expandedRowId
     ? sessions.find((r) => r.sessionId === expandedRowId) ?? null
@@ -106,16 +103,36 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
       {/* Toolbar — keep as-is, but only show when not in initial-load */}
       {!initialLoad && (
         <div className="flex items-center justify-between">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
             {sessions.length === 0
               ? "No remote sessions yet."
               : `${sessions.length} remote session${sessions.length === 1 ? "" : "s"}`}
+            {/* Background refresh indicator — shown when we have cached
+                rows on screen but a fresh list is still in flight. */}
+            {loading && sessions.length > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px]">
+                <Loader2 className="size-2.5 animate-spin" />
+                Refreshing
+              </span>
+            )}
           </p>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => void refresh()}
+            onClick={(e) => {
+              // Shift+Click forces a full refetch by invalidating the
+              // backend cache first — same UX convention as browser
+              // hard-refresh. Plain click uses the SHA-gated path.
+              if (e.shiftKey) {
+                void import("@/lib/api").then(({ githubInvalidateRemoteCache }) =>
+                  githubInvalidateRemoteCache().then(() => refresh()),
+                );
+              } else {
+                void refresh();
+              }
+            }}
             disabled={loading}
+            title="Hold Shift to force-refresh (bypasses cache)"
             className="cursor-pointer"
           >
             <RefreshCw
