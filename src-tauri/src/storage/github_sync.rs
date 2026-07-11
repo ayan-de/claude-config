@@ -83,11 +83,18 @@ pub fn save_path_mappings(path: &Path, m: &ProjectPathMappings) -> AppResult<()>
 }
 
 pub fn mappings_to_list(m: &ProjectPathMappings) -> Vec<ProjectPathMapping> {
+    // Invert slug_mappings so we can annotate each row's slug in one pass.
+    let slug_for_local: std::collections::HashMap<&str, &str> = m
+        .slug_mappings
+        .iter()
+        .map(|(slug, local)| (local.as_str(), slug.as_str()))
+        .collect();
     m.mappings
         .iter()
         .map(|(k, v)| ProjectPathMapping {
             original_path: k.clone(),
             local_path: v.clone(),
+            slug: slug_for_local.get(v.as_str()).map(|s| s.to_string()),
         })
         .collect()
 }

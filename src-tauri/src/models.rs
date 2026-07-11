@@ -462,13 +462,24 @@ pub struct RemoteSessionSummary {
 pub struct ProjectPathMapping {
     pub original_path: String,
     pub local_path: String,
+    /// Project slug as encoded by Claude Code (e.g. `-home-foo-Projects-bar`).
+    /// Optional for v3 backward-compat with entries persisted before
+    /// Phase 3. When present, slug-keyed lookups skip the project picker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPathMappings {
     pub version: u32,
+    /// Original decoded project path -> local project folder.
     pub mappings: std::collections::HashMap<String, String>,
+    /// Project slug -> local project folder. Populated alongside
+    /// `mappings` by Phase 3 writes. Empty for files written before
+    /// Phase 3; `#[serde(default)]` keeps old JSON round-tripping.
+    #[serde(default)]
+    pub slug_mappings: std::collections::HashMap<String, String>,
 }
 
 /// Per-project sync state. One file lives at
@@ -662,5 +673,35 @@ mod tests {
         // Exact count so a careless edit is caught. Update this when adding
         // Foundry in the follow-up PR.
         assert_eq!(CANONICAL_ENV_KEYS.len(), 20);
+    }
+
+    #[test]
+    fn project_path_mapping_round_trip_with_slug() {
+        let m = ProjectPathMapping {
+            original_path: "/home/foo/Projects/bar".to_string(),
+            local_path: "/home/baz/Projects/bar".to_string(),
+            slug: Some("-home-foo-Projects-bar".to_string()),
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        let back: ProjectPathMapping = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.slug.as_deref(), Some("-home-foo-Projects-bar"));
+    }
+
+    #[test]
+    fn project_path_mapping_round_trip_without_slug() {
+        // Backwards compat: an entry written before Phase 3 has no slug.
+        let json = r#"{"originalPath":"/home/foo","localPath":"/home/bar"}"#;
+        let m: ProjectPathMapping = serde_json::from_str(json).unwrap();
+        assert_eq!(m.slug, None);
+    }
+
+    #[test]
+    fn project_path_mappings_round_trip_without_slug_map() {
+        // Backwards compat: a file written before Phase 3 has no
+        // `slugMappings` key; it must deserialize to an empty map.
+        let json = r#"{"version":1,"mappings":{"/home/foo":"/home/bar"}}"#;
+        let m: ProjectPathMappings = serde_json::from_str(json).unwrap();
+        assert!(m.slug_mappings.is_empty());
+        assert_eq!(m.mappings.get("/home/foo").map(|s| s.as_str()), Some("/home/bar"));
     }
 }
