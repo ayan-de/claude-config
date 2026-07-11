@@ -1,10 +1,6 @@
 "use client";
 
-import { useState } from "react";
-
 import { Button } from "@/components/ui/button";
-import { RemoteSessionsModal } from "@/components/RemoteSessionsModal";
-import { useSessions } from "@/hooks/useSessions";
 import { cn } from "@/lib/utils";
 import type { GitHubSyncConfig } from "@/lib/types";
 
@@ -15,105 +11,64 @@ interface Props {
   onClick: () => void;
 }
 
-/**
- * Top-bar indicator for the GitHub connection. Mirrors the existing
- * `Sessions` button pattern (icon + toggle, square pill, tauri-no-drag
- * so the OS window drag still works on the rest of the bar).
- *
- * - Disconnected: full "Connect GitHub" pill with the GitHub mark
- * - Connected: round avatar (32px) with a small green dot in the corner
- *   so users can see at a glance whether their sync is wired up
- */
 export function GitHubTopBarButton({ config, loading, active, onClick }: Props) {
   const connected = !loading && config?.isConnected;
   const avatarUrl = config?.avatarUrl ?? null;
   const username = config?.username ?? null;
-  const { refresh: refreshSessions } = useSessions();
-  const [remoteOpen, setRemoteOpen] = useState(false);
-
-  // When connected: open the remote-sessions modal. When disconnected:
-  // fall through to the parent-supplied `onClick` so the existing
-  // settings-panel flow (OAuth connect) keeps working.
-  const handleClick = () => {
-    if (connected) {
-      setRemoteOpen(true);
-    } else {
-      onClick();
-    }
-  };
 
   if (connected && avatarUrl) {
     return (
-      <>
-        <button
-          type="button"
-          onClick={handleClick}
-          title={
-            username
-              ? `GitHub sync: connected as ${username} — click to browse remote sessions`
-              : "GitHub sync: connected — click to browse remote sessions"
-          }
-          aria-label="GitHub sync (connected)"
-          aria-pressed={active}
-          className={cn(
-            "tauri-no-drag relative flex size-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full transition",
-            active
-              ? "ring-2 ring-primary ring-offset-1 ring-offset-card/30"
-              : "ring-1 ring-foreground/15 hover:ring-foreground/40",
-          )}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={avatarUrl}
-            alt=""
-            className="size-full object-cover"
-            draggable={false}
-          />
-          <span
-            aria-hidden
-            className="absolute right-0 bottom-0 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
-          />
-        </button>
-        <RemoteSessionsModal
-          open={remoteOpen}
-          onClose={() => setRemoteOpen(false)}
-          onDownloaded={() => void refreshSessions()}
+      <button
+        type="button"
+        onClick={onClick}
+        title={
+          username
+            ? `GitHub sync: connected as ${username} — click to open sync settings`
+            : "GitHub sync: connected — click to open sync settings"
+        }
+        aria-label="GitHub sync (connected)"
+        aria-pressed={active}
+        className={cn(
+          "tauri-no-drag relative flex size-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full transition",
+          active
+            ? "ring-2 ring-primary ring-offset-1 ring-offset-card/30"
+            : "ring-1 ring-foreground/15 hover:ring-foreground/40",
+        )}
+      >
+        <img
+          src={avatarUrl}
+          alt=""
+          className="size-full object-cover"
+          draggable={false}
         />
-      </>
+        <span
+          aria-hidden
+          className="absolute right-0 bottom-0 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
+        />
+      </button>
     );
   }
 
   return (
-    <>
-      <Button
-        type="button"
-        onClick={handleClick}
-        variant="ghost"
-        size="sm"
-        title="Connect GitHub to back up sessions"
-        aria-label="Connect GitHub"
-        aria-pressed={active}
-        className={cn(
-          "tauri-no-drag h-7 gap-1.5 rounded-md px-2 text-xs font-medium",
-          active && "bg-primary/15 text-primary",
-        )}
-      >
-        <GithubIconMark className="size-3.5" />
-        <span>Connect</span>
-      </Button>
-      <RemoteSessionsModal
-        open={remoteOpen}
-        onClose={() => setRemoteOpen(false)}
-        onDownloaded={() => void refreshSessions()}
-      />
-    </>
+    <Button
+      type="button"
+      onClick={onClick}
+      variant="ghost"
+      size="sm"
+      title="Connect GitHub to back up sessions"
+      aria-label="Connect GitHub"
+      aria-pressed={active}
+      className={cn(
+        "tauri-no-drag h-7 gap-1.5 rounded-md px-2 text-xs font-medium",
+        active && "bg-primary/15 text-primary",
+      )}
+    >
+      <GithubIconMark className="size-3.5" />
+      <span>Connect</span>
+    </Button>
   );
 }
 
-/**
- * Hand-coded GitHub mark — same path used in GitHubSync.tsx and the
- * session row in Sessions.tsx. lucide-react doesn't ship one.
- */
 function GithubIconMark({ className }: { className?: string }) {
   return (
     <svg
