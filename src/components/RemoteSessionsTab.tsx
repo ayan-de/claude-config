@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GithubIcon } from "@/components/GitHubSync";
 import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { useRemoteSessions } from "@/hooks/useRemoteSessions";
 import { RemoteSessionsList } from "@/components/RemoteSessionsList";
 import { RemoteSessionDetail } from "@/components/RemoteSessionDetail";
 import type { RemoteSessionSummary } from "@/lib/types";
+import { AppError } from "@/lib/api";
 import type { GlobalTabId } from "@/data/globalTabs";
 
 interface Props {
@@ -57,6 +59,12 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
     });
   };
 
+  const classified = useMemo(
+    () => (error ? classifyError(error) : null),
+    [error],
+  );
+  const initialLoad = loading && sessions.length === 0 && error === null;
+
   // Not connected — show CTA.
   if (!config.isConnected) {
     return (
@@ -81,47 +89,185 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Toolbar: refresh + count */}
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground">
-          {sessions.length === 0
-            ? "No remote sessions yet."
-            : `${sessions.length} remote session${sessions.length === 1 ? "" : "s"}`}
-        </p>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="cursor-pointer"
-        >
-          <RefreshCw
-            className={loading ? "size-3.5 animate-spin" : "size-3.5"}
-          />
-          Refresh
-        </Button>
-      </div>
+      {/* Toolbar — keep as-is, but only show when not in initial-load */}
+      {!initialLoad && (
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] text-muted-foreground">
+            {sessions.length === 0
+              ? "No remote sessions yet."
+              : `${sessions.length} remote session${sessions.length === 1 ? "" : "s"}`}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void refresh()}
+            disabled={loading}
+            className="cursor-pointer"
+          >
+            <RefreshCw
+              className={loading ? "size-3.5 animate-spin" : "size-3.5"}
+            />
+            Refresh
+          </Button>
+        </div>
+      )}
 
-      <RemoteSessionsList
-        rows={sessions}
-        loading={loading}
-        error={error}
-        onDownload={handleDownload}
-        onPreview={handlePreview}
-        expandedRowId={expandedRowId}
-        emptyMessage="No remote sessions yet."
-      />
+      {/* Initial load */}
+      {initialLoad && (
+        <div className="flex flex-col items-center gap-2 rounded-lg border bg-card/40 px-4 py-10">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          <p className="text-[11px] text-muted-foreground">
+            Loading remote sessions…
+          </p>
+        </div>
+      )}
 
-      {expandedRow && (
-        <RemoteSessionDetail
-          row={expandedRow}
-          messages={transcriptState?.messages ?? null}
-          loading={transcriptState?.loading ?? false}
-          error={transcriptState?.error ?? null}
-          onClose={handleClose}
+      {/* Error with cached data — slim banner above list */}
+      {!initialLoad && error && sessions.length > 0 && classified && (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-[11px]">
+          <span className="text-destructive/90">
+            Showing cached results — {classified.message}
+          </span>
+          {classified.retryable && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void refresh()}
+              className="cursor-pointer"
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Error with no data — full error card */}
+      {!initialLoad && error && sessions.length === 0 && classified && (
+        <div className="rounded-lg border bg-card/40 px-4 py-8 text-center">
+          <AlertTriangle className="mx-auto size-5 text-destructive" />
+          <p className="mt-2 text-sm font-medium">{classified.message}</p>
+          <div className="mt-4 flex justify-center gap-2">
+            {classified.retryable && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void refresh()}
+                className="cursor-pointer"
+              >
+                <RefreshCw className="size-3.5" />
+                Retry
+              </Button>
+            )}
+            {classified.cta && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => onNavigate?.(classified.cta!.navigateTo)}
+                className="cursor-pointer"
+              >
+                {classified.cta.label}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Happy path: list (no error) */}
+      {!initialLoad && !error && (
+        <RemoteSessionsList
+          rows={sessions}
+          loading={loading}
+          error={null}
           onDownload={handleDownload}
+          onPreview={handlePreview}
+          expandedRowId={expandedRowId}
+          emptyMessage="No remote sessions yet."
         />
+      )}
+
+      {/* Detail wrapped in ErrorBoundary */}
+      {expandedRow && (
+        <ErrorBoundary
+          fallback={(err, reset) => (
+            <div className="rounded-lg border bg-card/40 px-4 py-6 text-center">
+              <AlertTriangle className="mx-auto size-5 text-destructive" />
+              <p className="mt-2 text-sm font-medium">Preview failed</p>
+              <p className="mx-auto mt-1 max-w-sm text-[11px] text-muted-foreground">
+                {err.message}
+              </p>
+              <div className="mt-3 flex justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    reset();
+                    handleClose();
+                  }}
+                  className="cursor-pointer"
+                >
+                  Close
+                </Button>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={reset}
+                  className="cursor-pointer"
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
+        >
+          <RemoteSessionDetail
+            row={expandedRow}
+            messages={transcriptState?.messages ?? null}
+            loading={transcriptState?.loading ?? false}
+            error={transcriptState?.error ?? null}
+            onClose={handleClose}
+            onDownload={handleDownload}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
+}
+
+interface ClassifiedError {
+  message: string;
+  retryable: boolean;
+  cta?: { label: string; navigateTo: GlobalTabId };
+}
+
+function classifyError(e: unknown): ClassifiedError {
+  const fallback = e instanceof Error ? e.message : String(e);
+  if (e instanceof AppError) {
+    switch (e.kind) {
+      case "github_auth_required":
+        return {
+          message: "GitHub authentication expired.",
+          retryable: false,
+          cta: { label: "Reconnect GitHub", navigateTo: "github-sync" },
+        };
+      case "github_not_configured":
+        return {
+          message: "GitHub sync isn't configured.",
+          retryable: false,
+          cta: { label: "Open settings", navigateTo: "github-sync" },
+        };
+      case "keyring_unavailable":
+        return {
+          message:
+            "OS keyring is unavailable — cannot read GitHub credentials.",
+          retryable: false,
+        };
+      case "validation":
+        return { message: e.message, retryable: false };
+      case "github_api":
+      case "internal":
+      default:
+        return { message: e.message || fallback, retryable: true };
+    }
+  }
+  return { message: fallback, retryable: true };
 }
