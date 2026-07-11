@@ -1,8 +1,9 @@
 //! Shared state held by the Tauri app. Cloned into each `#[tauri::command]`.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use crate::github::cache::GitHubCache;
 use crate::storage::KeyringStore;
 
 /// All shared state the Tauri commands need. Cheap to clone (`Arc` inside).
@@ -10,6 +11,10 @@ use crate::storage::KeyringStore;
 pub struct AppState {
     pub keyring: KeyringStore,
     pub app_data_dir: Arc<PathBuf>,
+    /// In-memory cache for the GitHub connection — owner, default
+    /// branch, last seen commit SHA, last tree, last sessions list.
+    /// See `docs/superpowers/plans/2026-07-11-remote-sessions-caching.md`.
+    pub github_cache: Arc<Mutex<GitHubCache>>,
 }
 
 impl AppState {

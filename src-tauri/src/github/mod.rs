@@ -4,6 +4,7 @@
 //! independently. `client` is the shared `reqwest::blocking::Client`
 //! (one per app, connection-pooled). Both submodules depend on it.
 
+pub mod cache;
 pub mod client;
 pub mod device_flow;
 pub mod repo;

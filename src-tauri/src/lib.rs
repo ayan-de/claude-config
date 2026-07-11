@@ -13,6 +13,7 @@ mod storage;
 mod tracker;
 
 use commands::settings::write_state;
+use github::cache::GitHubCache;
 use merge::derive_provider_name;
 use models::{Provider, ProviderKind, ProviderSecret, ProvidersFile, StateFile};
 use state::AppState;
@@ -49,6 +50,7 @@ pub fn run() {
             let app_state = AppState {
                 keyring,
                 app_data_dir: Arc::new(app_data_dir),
+                github_cache: Arc::new(std::sync::Mutex::new(GitHubCache::default())),
             };
             app.manage(app_state);
 
@@ -115,6 +117,8 @@ pub fn run() {
             commands::github_sync::github_resolve_download_target_cmd,
             commands::github_sync::github_download_session_cmd,
             commands::github_sync::github_fetch_remote_transcript_cmd,
+            commands::github_sync::github_invalidate_remote_cache_cmd,
+            commands::github_sync::github_get_blob_cache_stats_cmd,
             commands::github_sync::github_list_local_projects_cmd,
             commands::github_sync::github_get_session_sync_state_cmd,
             commands::github_sync::github_check_session_sync_status_cmd,
