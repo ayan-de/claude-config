@@ -1,32 +1,34 @@
 # GitHub Session Sync Implementation Plan
 
+> **Status:** Phases 1–3 shipped. Phase 4 (edge-case polish, retention, bulk operations) deferred. See `Implementation Status` at the end.
+
 ## Context
 
-Users need to sync Claude Code session transcripts across multiple machines. Currently, sessions live only at `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl` on the local filesystem. This feature adds GitHub-based sync: OAuth device flow authentication, per-session upload to a private GitHub repo, and download with project path remapping for cross-machine compatibility.
+Users need to sync Claude Code session transcripts across multiple machines. Sessions live at `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl` on the local filesystem. This feature adds GitHub-based sync: OAuth device flow authentication, per-session upload to a private GitHub repo, and download with project path remapping for cross-machine compatibility.
 
-The GitHub icon placeholder already exists in `SessionRow` (commit 1269bfd) — this feature wires it to working upload/download functionality.
+The GitHub icon placeholder already exists in `SessionRow` — this feature wires it to working upload/download functionality.
 
 ## Architecture Decisions
 
 ### 1. Separate GitHub Auth (Not a Provider)
 
-GitHub auth will be stored separately from the existing `Provider` system. Providers are for Claude API authentication (Subscription, Console, Bedrock, etc.); GitHub is a sync/backup service orthogonal to API access. 
+GitHub auth is stored separately from the existing `Provider` system. Providers are for Claude API authentication (Subscription, Console, Bedrock, etc.); GitHub is a sync/backup service orthogonal to API access.
 
 **Storage:**
-- Secrets: OS keyring under service `"claude-config"`, account `"github_sync"`
-- Metadata: New `github_sync.json` in app data directory
-- Path mappings: New `project_path_mappings.json` for cross-machine project path resolution
+- Secrets: OS keyring under service `"claude-config"`, account `"github_sync"` (stored as `ProviderSecret::Custom { auth_token }` — reuses the existing keyring plumbing without inventing a parallel API)
+- Metadata: `<app_data_dir>/github_sync.json`
+- Path mappings: `<app_data_dir>/project_path_mappings.json`
+- Per-project sync state: `<project_folder>/session_sync_state.json` (lives alongside Claude Code's `sessions-index.json`, so we can write it under a sidecar lock — see `storage/github_sync.rs::write_session_sync_state_atomic`)
 
 ### 2. GitHub Repo Structure
 
 ```
 claude-sessions/
-├── manifest.json              # Central index: project slugs → metadata
+├── manifest.json              # Central index (reserved for future use — not yet read or written)
 └── sessions/
     ├── home-ayan-de-Projects-claude-config/
     │   ├── <uuid-1>.jsonl
-    │   ├── <uuid-2>.jsonl
-    │   └── metadata.json      # Per-project metadata
+    │   └── metadata.json      # Per-project metadata: original_path + per-session title/modified
     └── home-ayan-de-Projects-foo/
         ├── <uuid-3>.jsonl
         └── metadata.json
@@ -34,11 +36,10 @@ claude-sessions/
 
 **Rationale:**
 - Project folders prevent name collisions
-- Central manifest enables quick project discovery
-- Per-project metadata preserves original paths for remapping
+- Per-project `metadata.json` preserves `original_path` (for cross-machine remapping) and per-session title/modified (for the Remote tab UI)
 - Slug encoding reuses Claude Code's pattern (replace all non-alphanumeric chars with `-`)
 
-**CRITICAL:** The slug encoding must match Claude Code's actual algorithm: replace ALL non-alphanumeric characters (not just `/`) with `-`. Paths like `/home/ayan.de/my_project` become `-home-ayan-de-my_project`. This encoding is lossy and non-unique (`ayan_de` and `ayan-de` collide), which is why `original_path` must always be stored separately in metadata.
+**Slug encoding note:** the encoding is lossy and non-unique (`ayan_de` and `ayan-de` collide). `original_path` is always stored separately in `metadata.json`, and the upload pipeline reads the slug straight from the transcript's parent directory (`slug_from_full_path`) — never re-derives it — so round-tripping is byte-exact.
 
 ### 3. Per-Session Operations (Bulk Later)
 
@@ -47,17 +48,22 @@ Initial implementation: click GitHub icon on a session row → upload that sessi
 ### 4. Project Path Remapping
 
 When downloading a session with `project_path: /home/ayan-de/Projects/foo` to a machine where that path doesn't exist:
-1. Show modal with dropdown of existing local projects
+1. Show modal with dropdown of existing local projects (`github_list_local_projects_cmd` enumerates `<claude_dir>/projects/*/`)
 2. User selects target project OR creates new directory via file picker
 3. Store mapping in `project_path_mappings.json` for future downloads
-4. Future downloads with same original path use stored mapping automatically
+4. Future downloads with same slug use the stored mapping automatically (slug-keyed lookup, see `github_resolve_download_target_cmd`)
+5. Mapped folder is re-validated on every download — stale mappings that point at deleted dirs return `Validation("mapped local folder does not exist: ...")`
+
+`project_path_mappings.json` keeps **two** indices to avoid forcing the picker on every download:
+- `mappings: HashMap<original_path, local_path>` — for display/edit UI
+- `slug_mappings: HashMap<slug, local_path>` — for download resolver
 
 ## Data Models
 
-### Rust Additions (src-tauri/src/models.rs)
+### Rust (`src-tauri/src/models.rs`)
 
 ```rust
-// Stored in OS keyring
+// Stored in OS keyring as ProviderSecret::Custom { auth_token }
 pub struct GitHubAuthSecret {
     pub access_token: String,
     pub username: Option<String>,
@@ -69,37 +75,52 @@ pub struct GitHubSyncConfig {
     pub schema_version: u32,
     pub is_connected: bool,
     pub username: Option<String>,
-    pub repo_name: String,  // default: "claude-sessions"
-    pub last_sync: Option<String>,
+    pub avatar_url: Option<String>,
+    pub repo_name: String,                  // default: "claude-sessions"
+    pub privacy_consent_given: bool,
+    pub last_sync: Option<String>,          // RFC3339
 }
 
 // Stored in project_path_mappings.json
 pub struct ProjectPathMappings {
     pub version: u32,
-    pub mappings: HashMap<String, String>,  // original → local
+    pub mappings: HashMap<String, String>,             // original_path → local
+    pub slug_mappings: HashMap<String, String>,        // slug → local (download hot path)
 }
 
-// Stored in ~/.claude/projects/<project-slug>/session_sync_state.json
-pub struct SessionSyncState {
+pub struct ProjectPathMapping { /* serialized view of one entry */ pub original_path, pub local_path, pub slug }
+
+// Stored in <project_folder>/session_sync_state.json
+pub struct SessionSyncStateFile {
     pub version: u32,
-    pub sessions: HashMap<String, SessionSyncMetadata>,  // session_id → metadata
+    pub sessions: HashMap<String, SessionSyncMetadata>, // session_id → metadata
 }
 
 pub struct SessionSyncMetadata {
-    pub last_uploaded: Option<String>,        // RFC3339 timestamp
+    pub last_uploaded: Option<String>,        // RFC3339
     pub remote_sha: Option<String>,            // GitHub blob SHA for conflict detection
-    pub last_local_modified: Option<String>,   // File mtime at upload time
+    pub last_local_modified: Option<String>,   // File mtime at upload time (RFC3339)
     pub sync_state: SyncState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SyncState {
-    NeverUploaded,
-    Synced,
-    OutOfSync,     // Local changes after last upload
+pub enum SyncState { NeverUploaded, Synced, OutOfSync }
+
+// Per-project metadata stored in the repo (committable alongside sessions)
+pub struct ProjectRemoteMetadata {
+    pub version: u32,
+    pub original_path: String,
+    pub sessions: HashMap<String, RemoteSessionEntry>,  // session_id → entry
 }
 
+pub struct RemoteSessionEntry {
+    pub title: Option<String>,
+    pub modified: Option<String>,
+    pub message_count: u32,
+}
+
+// OAuth device flow
 pub struct GitHubDeviceFlowStart {
     pub device_code: String,
     pub user_code: String,
@@ -108,6 +129,7 @@ pub struct GitHubDeviceFlowStart {
     pub interval: u64,
 }
 
+// Remote tab summary (built from a recursive tree walk)
 pub struct RemoteSessionSummary {
     pub session_id: String,
     pub project_slug: String,
@@ -115,371 +137,410 @@ pub struct RemoteSessionSummary {
     pub title: Option<String>,
     pub modified: Option<String>,
     pub message_count: u32,
-    pub sha: String,  // GitHub blob SHA for conflict detection
+    pub sha: String,
+}
+
+pub enum SessionConflictKind { RemoteNewer, LocalNewer }
+pub struct DownloadResult { session_id, full_path, sync_state }
+
+// Cache stats for a future settings UI
+pub struct BlobCacheStats { file_count: u64, total_bytes: u64 }
+```
+
+### Error Model (`src-tauri/src/models.rs::AppError`)
+
+```rust
+pub enum AppError {
+    GitHub { status: u16, message: String },         // generic GitHub failure
+    GitHubAuthRequired,                              // HTTP 401 — token expired/revoked
+    GitHubNotConfigured(String),                     // "not_connected" | "privacy_consent_required"
+    SessionDownloadConflict { kind: SessionConflictKind, session_id: String },
+    KeyringUnavailable(String),
+    Validation(String),
+    Internal(String),
+    // ... existing variants ...
 }
 ```
 
-### TypeScript Additions (src/lib/types.ts)
+The frontend's `AppError` class mirrors these `kind` strings for `instanceof` branching in UI.
 
-Mirror the Rust types with camelCase serialization for all new interfaces.
+### TypeScript (`src/lib/types.ts`)
+
+Mirror the Rust types with `camelCase` serialization.
 
 ## Tauri Commands
 
-All in new `src-tauri/src/commands/github_sync.rs`:
+All in `src-tauri/src/commands/github_sync.rs` (currently **21 commands**, up from the 11 listed in the original plan):
 
-1. `get_github_sync_config_cmd() -> AppResult<GitHubSyncConfig>`
-2. `github_start_device_flow_cmd() -> AppResult<GitHubDeviceFlowStart>`
-3. `github_poll_device_flow_cmd(device_code: String) -> AppResult<String>` (returns username)
-4. `github_disconnect_cmd() -> AppResult<()>`
-5. `github_upload_session_cmd(session_id, full_path, project_path) -> AppResult<()>`
-6. `github_list_remote_sessions_cmd() -> AppResult<Vec<RemoteSessionSummary>>`
-7. `github_download_session_cmd(session_id, project_slug, target_project_path) -> AppResult<String>`
-8. `github_get_path_mappings_cmd() -> AppResult<Vec<ProjectPathMapping>>`
-9. `github_set_path_mapping_cmd(original_path, local_path) -> AppResult<()>`
-10. `github_get_session_sync_state_cmd(project_path: String) -> AppResult<SessionSyncState>`
-11. `github_check_session_sync_status_cmd(session_id: String, full_path: String) -> AppResult<SyncState>`
+**OAuth / connection (7)**
+1. `get_github_sync_config_cmd() -> GitHubSyncConfig`
+2. `github_start_device_flow_cmd() -> GitHubDeviceFlowStart`
+3. `github_poll_device_flow_cmd(device_code) -> GitHubPollOutcome` (Pending/SlowDown/Denied/Expired/Authorized{username,avatar_url})
+4. `github_disconnect_cmd() -> ()` — wipes in-memory cache + on-disk blob cache + keyring token + `is_connected` flag (privacy consent is preserved across reconnects)
+5. `github_set_privacy_consent_cmd(given: bool)`
+6. `github_set_repo_name_cmd(repo_name: String)` — validates no slashes/spaces/empty
+7. `github_open_verification_url_cmd(verification_uri)` — wraps `tauri-plugin-opener`
+
+**Path mappings (3)**
+8. `github_get_path_mappings_cmd() -> Vec<ProjectPathMapping>`
+9. `github_set_path_mapping_cmd(original_path, local_path, slug?)` — populates both `mappings` and `slug_mappings`
+10. `github_remove_path_mapping_cmd(original_path)`
+
+**Repo probe + upload (2)**
+11. `github_check_repo_cmd() -> Option<RepoProbeResult { full_name, default_branch }>`
+12. `github_upload_session_cmd(session_id, full_path, project_path) -> SessionSyncMetadata` — single atomic commit, refreshes per-project `metadata.json` in the same commit, invalidates `sessions_list` cache
+
+**Sync state (2)**
+13. `github_get_session_sync_state_cmd(project_folder) -> SessionSyncStateFile` — reclassifies every entry's `sync_state` against current mtime before returning
+14. `github_check_session_sync_status_cmd(session_id, full_path) -> SyncState` — single-row reclassification
+
+**Remote list / download / preview (4)**
+15. `github_list_remote_sessions_cmd() -> Vec<RemoteSessionSummary>` — **async**, SHA-gated (see `Caching Layer`)
+16. `github_resolve_download_target_cmd(project_slug) -> Option<String>` — slug-keyed lookup; `None` triggers the picker
+17. `github_download_session_cmd(session_id, project_slug, blob_sha, force?) -> DownloadResult` — runs conflict check against per-project `metadata.json`, writes via temp + fsync + atomic rename, registers with `sessions-index.json`
+18. `github_fetch_remote_transcript_cmd(session_id, blob_sha) -> Vec<SessionMessage>` — preview without disk write; uses `tempfile::NamedTempFile` only because `parse_session_transcript` takes a `&Path`
+
+**Local helper (1)**
+19. `github_list_local_projects_cmd() -> Vec<String>` — feeds the ProjectPicker dropdown
+
+**Cache management (2)**
+20. `github_invalidate_remote_cache_cmd()` — drops in-memory cache (frontend calls on Shift+Refresh)
+21. `github_get_blob_cache_stats_cmd() -> BlobCacheStats` — surfaces size for a future settings UI
 
 ## GitHub API Integration
 
-### OAuth Device Flow
+### Shared HTTP Client (`src-tauri/src/github/client.rs`)
 
-**Endpoints:**
-- `POST https://github.com/login/device/code` (client_id: register new OAuth App)
+- One `reqwest::blocking::Client` per app (`OnceLock`), 5s connect / 15s total timeout
+- Token passed per-request (not stored on the client) so `github_disconnect_cmd` doesn't need to rebuild it
+- Typed `GitHubError` enum: `Http { status, body }`, `RateLimited { retry_after_secs }` (parsed from `Retry-After`), `Network(String)`, `Parse(String)`
+- `parse()` maps 401 → `GitHubAuthRequired` (so frontend can branch on `AppError.kind === "github_auth_required"`), 429 → `RateLimited`, anything else → `Http`
+- `b64_encode` / `b64_decode` exported here (GitHub wraps blobs at 60 chars; decoder strips whitespace)
+
+### OAuth Device Flow (`src-tauri/src/github/device_flow.rs`)
+
+**Endpoints (unauthenticated):**
+- `POST https://github.com/login/device/code` (client_id from OAuth App)
 - `POST https://github.com/login/oauth/access_token` (poll with device_code)
-- `GET https://api.github.com/user` (fetch username after token granted)
 
 **Flow:**
-1. Backend initiates device flow, returns `device_code`, `user_code`, `verification_uri`
-2. Frontend opens `verification_uri` in browser via `shell.open`
-3. Frontend polls `github_poll_device_flow_cmd()` every `interval` seconds
-4. On success, backend stores `access_token` in keyring and updates `github_sync.json`
+1. Backend initiates device flow → returns `device_code`, `user_code`, `verification_uri`
+2. Frontend opens `verification_uri` via `github_open_verification_url_cmd` (uses `tauri-plugin-opener`)
+3. Frontend polls `github_poll_device_flow_cmd()` every `interval` seconds, with `slow_down` doubling the interval
+4. On `Authorized`, backend stores `access_token` in keyring as `ProviderSecret::Custom { auth_token }`, writes `github_sync.json`, **seeds the in-memory `GitHubCache.owner`** from the OAuth response so the first tab open after connecting skips the `GET /user` round-trip
 
-**OAuth App Registration:** Create at https://github.com/settings/developers
-- Name: "Claude Config Session Sync"
-- Scopes: `repo` (private repo access)
-- Device flow doesn't require callback URL
+### Repository Operations (`src-tauri/src/github/repo.rs` + `upload.rs`)
 
-### Repository Operations (Git Data API)
+Uses Git Data API exclusively (Contents API's ~50MB PUT limit doesn't fit real sessions).
 
-**Use Git Data API** (Contents API has 1MB GET limit and ~50MB practical PUT limit - real sessions exceed both)
+**Helpers (`repo.rs`):** `get_repo`, `create_repo`, `get_authenticated_user`, `get_branch_ref_sha`, `get_branch_head`, `get_tree_recursive`, `create_blob`, `create_tree`, `create_commit`, `create_ref`, `update_ref`, `get_blob`, `tree_to_remote_sessions`, `diff_slugs` (per-slug delta between two trees), `list_remote_sessions_with_diff` (diff-aware splice), `fetch_project_metadata` (404-tolerant)
 
-**Key endpoints:**
-- `GET /repos/{owner}/{repo}` — Check repo existence, get default_branch
-- `POST /user/repos` — Create new private repo (body: `{"name": "claude-sessions", "private": true}`)
-- `GET /repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1` — List all files, get blob SHAs
-- `GET /repos/{owner}/{repo}/git/blobs/{sha}` — Get file content (supports up to 100MB)
-- `POST /repos/{owner}/{repo}/git/blobs` — Create blob (returns SHA)
-- `POST /repos/{owner}/{repo}/git/trees` — Create tree with new blobs
-- `POST /repos/{owner}/{repo}/git/commits` — Create commit
-- `POST /repos/{owner}/{repo}/git/refs` — Create branch ref (first commit only)
-- `PATCH /repos/{owner}/{repo}/git/refs/heads/{branch}` — Update existing branch ref
-
-**Auth header:** `Authorization: Bearer {access_token}`
-
-**Upload flow (Git Data API plumbing):**
-1. Check if repo exists via `GET /repos/{owner}/{repo}`
-   - If not exists: create with `POST /user/repos` body `{"name": "claude-sessions", "private": true}`
-   - Store `default_branch` from repo object (don't hardcode "main")
-2. Try to get current commit SHA from `refs/heads/{default_branch}`
-   - If ref doesn't exist (first commit): set `is_first_commit = true`, no parent/base_tree
-   - If ref exists: get commit SHA, then get its tree SHA for base_tree
-3. For each file to upload:
-   - Create blob: `POST .../git/blobs` with base64-encoded content
-   - Collect returned blob SHA
-4. Create tree: `POST .../git/trees`
-   - First commit: no `base_tree` parameter, full file tree from scratch
-   - Subsequent commits: include `base_tree` SHA + only changed blobs
-5. Create commit: `POST .../git/commits` with new tree SHA
-   - First commit: no `parents` parameter
-   - Subsequent commits: `parents: [parent_commit_sha]`
-6. Update/create ref:
-   - First commit: `POST .../git/refs` with `{"ref": "refs/heads/{default_branch}", "sha": new_commit_sha}`
-   - Subsequent commits: `PATCH .../git/refs/heads/{default_branch}` with `{"sha": new_commit_sha}`
+**Upload orchestration (`upload.rs`):**
+- `ensure_repo(token, owner, repo_name)` — get-or-create the private repo, returns its `default_branch`
+- `fetch_existing_file(token, owner, repo, branch, path)` — for merging into existing `metadata.json` before re-commit
+- `upload_files(token, owner, repo_name, message, files)` — single commit that creates/updates any number of files:
+  1. Create all blobs upfront (content-addressed, independent of parent)
+  2. Loop up to `MAX_ATTEMPTS = 3`:
+     - Snapshot current head (`None` ⇒ first commit)
+     - Build tree (with `base_tree` on subsequent commits, without on first)
+     - Create commit (no `parents` on first commit)
+     - Move the ref (`POST .../git/refs` on first commit, `PATCH .../git/refs/heads/{branch}` otherwise)
+     - On `422` from either call (race), rebuild against the new head and retry
 
 **Download flow:**
-1. Get tree: `GET .../git/trees/{default_branch}?recursive=1` to find blob SHA for target path
-2. Get blob: `GET .../git/blobs/{sha}` (returns base64 content, no size limit up to 100MB)
-3. Decode base64 content
-4. Check if project path mapping exists; prompt user if not
-5. Write to `~/.claude/projects/{encoded_local_path}/{session_id}.jsonl`
-6. Add to local `sessions-index.json` with file locking to avoid race with live Claude Code sessions
+1. Look up `slug_mappings[project_slug]` to get target folder (else `path_mapping_required` triggers picker)
+2. Verify target dir exists on disk
+3. Recursive tree walk → find `sessions/<slug>/metadata.json` blob SHA → fetch and decode (best-effort: 404 returns `ProjectRemoteMetadata::default()`)
+4. Compare remote `modified` (from `metadata.json`) vs local mtime (RFC3339 string compare). Disagreement ⇒ `SessionDownloadConflict { kind: RemoteNewer | LocalNewer, session_id }` unless `force` is true
+5. Fetch session blob (cached via `fetch_blob_cached`), write via `NamedTempFile` + fsync + atomic rename to `<target>/<session_id>.jsonl`
+6. Register with Claude Code's `sessions-index.json` via `upsert_into_sessions_index`
+7. Update per-project `session_sync_state.json` so the row appears green immediately
+8. Record `cfg.last_sync` on `github_sync.json`
+
+## Caching Layer (`src-tauri/src/github/cache.rs`)
+
+Two-tier cache, designed to make the Remote tab paint without paying the full tree-walk cost on every open.
+
+### Tier 1 — In-Memory (`GitHubCache` on `AppState`)
+
+`Arc<Mutex<GitHubCache>>`, lives on `AppState`, **all fields are per-token** (cleared on disconnect and on every fresh OAuth login):
+
+| Field | Purpose |
+|---|---|
+| `owner: Option<String>` | Seeded from OAuth response; skips `GET /user` on first tab open |
+| `default_branch: Option<String>` | Cached alongside owner; filled on first list call (can't seed at OAuth time — repo may not exist yet) |
+| `commit_sha: Option<String>` | The SHA-gate — `get_branch_ref_sha()` matches this and short-circuits |
+| `tree: Option<Tree>` | Last successful recursive tree; used as the "before" side of `diff_slugs` |
+| `sessions_list: Option<Vec<RemoteSessionSummary>>` | The spliced result; returned verbatim on SHA-gate hit |
+
+Invalidation triggers:
+- `github_disconnect_cmd` → `cache.clear()` (drops every field)
+- `github_poll_device_flow_cmd` Authorized branch → `cache.clear()` then seed `owner`
+- `github_upload_session_cmd` → clear `commit_sha`, `tree`, `sessions_list` (owner + default_branch still valid)
+- `github_invalidate_remote_cache_cmd` → `cache.clear()` (Shift+Refresh escape hatch)
+
+**Not single-flight:** the lock is dropped before any HTTP call so a stuck request can't block every other command. Two concurrent misses both fire the request — acceptable for human-driven tab clicks.
+
+### Tier 2 — On-Disk Blob Cache
+
+`${app_data_dir}/github_cache/blobs/{sha}` — content-addressed by SHA-1 (GitHub blob API is content-addressed, so byte-correct forever).
+
+- **Atomic writes:** `tempfile::NamedTempFile` + `sync_all` + `persist` (matches `write_session_sync_state_atomic` pattern)
+- **SHA validation:** accepts only 40-char lowercase hex (rejects uppercase + wrong length; manual scan instead of pulling `regex` into the dep tree)
+- **Size cap:** default 200 MB, override with `GITHUB_BLOB_CACHE_MAX_MB` env var. LRU eviction by mtime when over cap
+- **Cleared on disconnect** (same invariant: token gone, sensitive data gone)
+- **Best-effort writes:** cache misses that successfully fetch from GitHub log a warning on cache-put failure but never fail the parent command. GitHub stays the source of truth
+
+### Tier 3 — localStorage SWR (`useRemoteSessions.ts`)
+
+Frontend tier, independent of the Rust caches:
+- Key `remoteSessions:v1`, TTL 24h
+- `useState` initial value is seeded from `readCachedSessions()` so the tab paints instantly on remount
+- `loading` is `false` when we have cached rows — a background `refresh()` reconciles after mount
+- Cold mount with no cache shows the spinner until `refresh()` resolves
+- `clearCachedRemoteSessions()` runs on disconnect so the next user doesn't inherit the previous user's list
+- **Stale-row guard on download:** if `Date.now() - lastRefreshAt > 60s`, invalidate the in-memory cache and refetch before downloading — catches the "row was deleted upstream" case before we 404 on the download call
+
+## SHA-Gated List Algorithm
+
+`github_list_remote_sessions_cmd` (`commands/github_sync.rs:619`) is the hot path. Cost breakdown:
+
+| Cache state | Network calls |
+|---|---|
+| Warm cache, ref SHA unchanged | **1 call** (`GET /git/ref/heads/{branch}`) — return cached list verbatim |
+| Cold cache or ref SHA shifted | `2 + N` calls: `GET /user` (if owner not cached) + `GET /repos/.../git/ref/heads/{branch}` + `GET /repos/.../git/trees/{branch}?recursive=1` + `GET /repos/.../git/blobs/{sha}` per **changed** slug's `metadata.json` |
+| Repo doesn't exist | 2 calls (owner probe + repo probe), returns `[]` |
+
+Per-slug diff (`repo.rs::diff_slugs`): one pass over both trees, returns `{ changed, removed }`. Slugs in `changed` get a fresh `metadata.json` fetch; slugs in `removed` are dropped from the spliced result (otherwise the UI surfaces a row that would 404 on download); unchanged slugs are spliced verbatim from the previous list.
+
+The cache is written back with the **current** tree (not a transformed one), so the next diff has the same source format.
 
 ## UI Components
 
-### New Components (src/components/GitHubSync.tsx)
+### Layout: Local/Remote Tabs in `SessionsView`
 
-**GitHubSyncPanel** — Settings panel for GitHub connection
-- Connection status (username or "Not connected")
-- "Connect GitHub" / "Disconnect" buttons
-- Repository name input (default: "claude-sessions")
-- "View remote sessions" button
+The Sessions tab has a `SessionsTabs` Local/Remote control (`src/components/SessionsTabs.tsx`). The Remote tab is `lazy()`-loaded with a Suspense fallback showing the same spinner the initial-load path uses.
 
-**GitHubDeviceFlowModal** — OAuth flow UI
-- Display `user_code` prominently
-- "Open GitHub" button → opens verification URL
-- Spinner with auto-polling every `interval` seconds
-- Success message with username on completion
+**Why a tab, not a separate panel:** the original plan said the remote UI lives in per-row icons + a sibling modal. In practice, users want to browse remote sessions in the same surface as their local sessions — and the data shapes are similar enough that one list component can render both. The original modal (`RemoteSessionsModal`) still exists as the download surface opened from `RemoteSessionsTab`.
 
-**RemoteSessionsModal** — Browse GitHub sessions
-- List grouped by project slug
-- Shows title, modified timestamp, message count per session
-- "Download" button per session → triggers ProjectPickerModal if needed
+**Why lazy-load:** the Remote tab pulls in `RemoteSessionsList`, `RemoteSessionDetail`, `useRemoteSessions`, and a chunk of `api.ts` for cache invalidation. Keeping it out of the initial bundle means the Local tab (the common case) doesn't pay the parse cost.
 
-**ProjectPickerModal** — Select target project for download
-- Dropdown with existing projects from `~/.claude/projects/`
-- "Create new project" option → file picker
-- "Remember this mapping" checkbox (default enabled)
-- Shows original path for context
+### Components
+
+- `SessionsTabs.tsx` — Local/Remote segmented control
+- `RemoteSessionsTab.tsx` — Remote pane: toolbar (count + Refresh button) + initial-load spinner / not-connected CTA / cached-data-with-error banner / list / detail. Uses `useRemoteSessions` for state, `ErrorBoundary` for the detail, and a custom `RemoteSessionsError` class with a `cta` field so the boundary's fallback can deep-link the user to GitHub Sync settings on auth-required errors
+- `RemoteSessionsList.tsx` — extracted, reused by `RemoteSessionsTab` and `RemoteSessionsModal`
+- `RemoteSessionDetail.tsx` — per-row preview pane (lazy-loaded messages via `github_fetch_remote_transcript_cmd`)
+- `RemoteSessionsModal.tsx` — sibling download surface still opened from some legacy call sites
+- `ProjectPickerModal.tsx` — dropdown of `github_list_local_projects_cmd` results + "create new" file picker + "remember this mapping" checkbox
+- `ErrorBoundary.tsx` — reusable boundary with `fallback` render-prop. Used around the Remote tab (catches `RemoteSessionsError` thrown by `RemoteSessionsTab`) and around the detail pane
+- `GitHubSync.tsx` — `GitHubSyncPanel` (settings), `GitHubSyncSidebarButton` (sidebar), `GithubIcon` (exported for reuse)
+- `GitHubTopBarButton.tsx` — **Both connected (avatar) and disconnected ("Connect") states delegate to the parent's `onClick`, which opens the `github-sync` settings tab.** (Earlier behavior opened the Remote modal from the avatar; flipped because the settings tab is the canonical entry point for managing the connection.)
 
 ### Modified Components
 
-**src/components/Sessions.tsx:**
-- Wire GitHub icon click handler in `SessionRow` (lines 418-425)
-- Call `github_upload_session_cmd()` with session metadata
-- Show upload state with dynamic icon colors:
-  - **Gray (muted)**: `NeverUploaded` - clickable, tooltip "Upload to GitHub"
-  - **Green (primary)**: `Synced` - clickable, tooltip "Last uploaded: {time}"
-  - **Yellow (warning)**: `OutOfSync` - clickable, tooltip "Local changes detected. Click to update."
-  - **Spinner**: `Uploading` - not clickable, tooltip "Uploading..."
-- Below session metadata row, add small text showing sync timestamps when applicable:
-  - "Uploaded {relative_time} · Modified {relative_time}" when `OutOfSync`
-  - "Uploaded {relative_time}" when `Synced`
-- Add "GitHub" button in `SessionsView` header (opens RemoteSessionsModal, visible only when connected)
+- `Sessions.tsx` — wires the Local/Remote tabs, the GitHub sync legend (gray/amber/primary swatches), and the lazy Remote pane. `SessionUploadProvider` lives on the Local side; the Remote side is stateless wrt uploads.
+- `Sessions.tsx` row — wires the GitHub icon click for upload, colors per `SyncState`:
+  - **Gray** (muted): `NeverUploaded` — tooltip "Upload to GitHub"
+  - **Amber**: `OutOfSync` (local mtime != `last_local_modified`) — tooltip "Local changes since upload"
+  - **Primary** (green): `Synced` — tooltip "Uploaded {relative_time}"
+  - **Spinner**: uploading — not clickable
+
+### Top-bar wiring (`src/app/page.tsx:107`)
+
+`<GitHubTopBarButton>` always opens the `github-sync` panel (no special-case for connected state). The user's title-bar `<button>` pattern (no `Button` component, custom sizing for the avatar) is preserved.
 
 ## Sync State Workflow
 
 ### On Session Upload
-1. Read current file mtime: `fs::metadata(full_path)?.modified()?`
-2. Upload session to GitHub via Git Data API
-3. Store in `session_sync_state.json`:
-   - `last_uploaded`: current timestamp (RFC3339)
-   - `remote_sha`: GitHub blob SHA from upload response
-   - `last_local_modified`: file mtime at upload time
-   - `sync_state`: `Synced`
-4. Return success to frontend → icon turns green
+1. Read mtime, check ≤95 MB (GitHub blob limit is 100MB; base64 inflates ~33%)
+2. Privacy gate: `cfg.privacy_consent_given` must be true (`AppError::GitHubNotConfigured("privacy_consent_required")` otherwise)
+3. Build session blob + refreshed per-project `metadata.json` (merged with existing entries so other sessions are preserved)
+4. `upload_files()` → atomic commit on default branch, with 422-retry up to 3× for concurrent ref moves
+5. Persist `SessionSyncMetadata { last_uploaded, remote_sha, last_local_modified, sync_state: Synced }` to `session_sync_state.json`
+6. Update `cfg.last_sync`
+7. Drop `commit_sha`/`tree`/`sessions_list` from `GitHubCache`
 
-### On Session List Load
-For each session in the list:
-1. Check if `session_sync_state.json` exists for this project
-2. If sync metadata exists for this session_id:
-   - Read current file mtime
-   - Compare with stored `last_local_modified`
-   - If mtimes differ: set `sync_state` to `OutOfSync` → icon turns yellow
-   - If mtimes match: keep `sync_state` as `Synced` → icon stays green
-3. If no sync metadata: `sync_state` is `NeverUploaded` → icon gray
+### On Sync State Read
+`github_get_session_sync_state_cmd` recomputes every entry's `sync_state` against current mtime before returning. Persisted value is only authoritative right after upload; anything downstream must trust the recomputed view. Same pattern in `github_check_session_sync_status_cmd` for single-row lookups.
+
+`classify_sync_state(Some(&meta), current_mtime)` (in `storage/github_sync.rs`):
+- `meta.last_local_modified.is_none()` → `NeverUploaded`
+- `current_mtime != parsed_meta.last_local_modified` → `OutOfSync`
+- else → `Synced`
 
 ### On Upload Click (Out of Sync)
-1. User clicks yellow icon (session has local changes after previous upload)
-2. Show confirmation: "This session has local changes. Update remote copy?"
-3. On confirm: re-upload (same flow as initial upload)
-4. Update `session_sync_state.json` with new timestamps and SHA
-5. Icon turns green again
+No separate confirmation — clicking the amber icon uploads directly. UI changes color as soon as the next `get_session_sync_state_cmd` round-trip lands.
 
 ### On Download
-1. Download session from GitHub
-2. Write to local filesystem
-3. Create sync metadata entry:
-   - `last_uploaded`: remote file's last commit timestamp
-   - `remote_sha`: GitHub blob SHA
-   - `last_local_modified`: file mtime after write
-   - `sync_state`: `Synced`
-4. Icon immediately shows green in sessions list
+1. `useRemoteSessions.download()` checks if `lastRefreshAt > 60s` old → invalidate + refetch
+2. Re-check the row still exists with same SHA in the fresh list (catches upstream delete)
+3. `github_resolve_download_target_cmd(slug)` → if `None`, surface `path_mapping_required` and the modal opens the picker
+4. `github_download_session_cmd(...)` runs the conflict check, writes atomically, registers with `sessions-index.json`
+5. On `SessionDownloadConflict`, the hook shows a `window.confirm()` and retries with `force: true` if the user agrees
 
-**src/components/SettingsMenu.tsx:**
-- Add "GitHub Sync" menu item (opens GitHubSyncPanel)
+### Privacy Warning (First Upload)
+
+`GitHubSync.tsx` shows the consent UI before the first upload. Once the user checks "I understand..." and clicks Save, `cfg.privacy_consent_given` becomes true and stays true across reconnects (deliberate: we don't nag).
 
 ## Files to Create
 
 ### Rust (Backend)
-- `src-tauri/src/commands/github_sync.rs` — All 9 commands
-- `src-tauri/src/storage/github_sync.rs` — Load/save github_sync.json, project_path_mappings.json
-- `src-tauri/src/github/mod.rs` — GitHub API client module
-- `src-tauri/src/github/device_flow.rs` — Device flow implementation
-- `src-tauri/src/github/repo.rs` — Repo operations (upload/download/list)
+- `src-tauri/src/commands/github_sync.rs` — all 21 commands
+- `src-tauri/src/storage/github_sync.rs` — load/save `github_sync.json`, `project_path_mappings.json`, `session_sync_state.json` (atomic), `classify_sync_state`, `project_metadata_path`, `remote_session_path`
+- `src-tauri/src/github/mod.rs` — module wiring
+- `src-tauri/src/github/client.rs` — shared `reqwest::blocking::Client`, typed `GitHubError`, `b64_encode`/`b64_decode`
+- `src-tauri/src/github/device_flow.rs` — start + poll device flow, `DeviceFlowOutcome` enum
+- `src-tauri/src/github/repo.rs` — `get_repo`, `create_repo`, `get_tree_recursive`, `create_blob`/`tree`/`commit`/`ref`, `get_blob`, `diff_slugs`, `list_remote_sessions_with_diff`, `fetch_project_metadata`
+- `src-tauri/src/github/upload.rs` — `ensure_repo`, `upload_files` (with 422-retry), `UploadFile`/`UploadResult` structs
+- `src-tauri/src/github/cache.rs` — `GitHubCache` (in-memory, on `AppState`), `get_cached_blob`/`put_cached_blob`/`clear_blob_cache`/`enforce_blob_cache_size` (on-disk), `BlobCacheStats`
 
 ### TypeScript (Frontend)
-- `src/components/GitHubSync.tsx` — All GitHub sync UI components
-- `src/hooks/useGitHubSync.ts` — React hooks for GitHub sync state
-- `src/lib/github.ts` — Device flow polling helper
+- `src/components/GitHubSync.tsx` — `GitHubSyncPanel`, `GitHubSyncSidebarButton`, `GithubIcon`
+- `src/components/GitHubTopBarButton.tsx` — top-bar avatar/Connect (always opens sync settings)
+- `src/components/Sessions.tsx` — Local/Remote tabs, SessionGroup legend, lazy-loaded Remote pane
+- `src/components/SessionsTabs.tsx` — Local/Remote segmented control
+- `src/components/RemoteSessionsTab.tsx` — Remote pane (toolbar, list, detail, error classification)
+- `src/components/RemoteSessionsList.tsx` — extracted row list (reused by tab + modal)
+- `src/components/RemoteSessionDetail.tsx` — per-row preview with messages
+- `src/components/RemoteSessionsModal.tsx` — sibling download surface (legacy call sites)
+- `src/components/ProjectPickerModal.tsx` — local-project dropdown + file picker
+- `src/components/ErrorBoundary.tsx` — reusable boundary with `fallback` render-prop
+- `src/hooks/useGitHubSync.ts`, `src/hooks/GitHubSyncContext.tsx` — connection state + polling
+- `src/hooks/useRemoteSessions.ts` — SHA-gated list + SWR localStorage cache + download + transcript preview
+- `src/hooks/useSessionUpload.ts` — per-row upload state, optimistic updates
 
 ## Files to Modify
 
 ### Rust
-- `src-tauri/src/commands/mod.rs` — Add `pub mod github_sync;`
-- `src-tauri/src/lib.rs` — Register 9 new commands in `.invoke_handler()`
-- `src-tauri/src/models.rs` — Add 5 new structs (GitHubAuthSecret, etc.)
-- `src-tauri/src/storage/mod.rs` — Add `pub mod github_sync;`
-- `src-tauri/src/storage/keyring.rs` — Add `const GITHUB_SYNC_ACCOUNT: &str = "github_sync";`
+- `src-tauri/src/commands/mod.rs` — `pub mod github_sync;`
+- `src-tauri/src/lib.rs` — register all 21 commands in `.invoke_handler()`; seed `github_cache` on `AppState` construction
+- `src-tauri/src/state.rs` — `pub github_cache: Arc<Mutex<GitHubCache>>` field
+- `src-tauri/src/models.rs` — add all data models + `AppError` variants (`GitHub`, `GitHubAuthRequired`, `GitHubNotConfigured`, `SessionDownloadConflict`)
+- `src-tauri/src/storage/mod.rs` — `pub mod github_sync;`
+- `src-tauri/src/storage/keyring.rs` — `const GITHUB_KEYRING_ACCOUNT: &str = "github_sync";`
+- `src-tauri/Cargo.toml` — `base64` (added), `chrono` (added), `tempfile` (added), `reqwest` (already in use), `keyring` (already in use), `tauri-plugin-opener` (already configured)
 
 ### TypeScript
-- `src/lib/api.ts` — Add 9 typed wrappers for new commands
-- `src/lib/types.ts` — Add 5 new TypeScript interfaces
-- `src/components/Sessions.tsx` — Wire GitHub icon, add header button
-- `src/components/SettingsMenu.tsx` — Add GitHub Sync menu item
+- `src/lib/api.ts` — typed wrappers for all 21 commands + `AppError` class with `kind` discriminant
+- `src/lib/types.ts` — mirror Rust data models with `camelCase`
+- `src/components/Sessions.tsx` — Local/Remote tabs, GitHub legend, lazy Remote pane, row sync-state coloring
+- `src/data/globalTabs.ts` — register `github-sync` tab (sidebar button + panel)
 
 ### Configuration
-- `src-tauri/tauri.conf.json` — Verify `shell.open` permission exists (already in `opener:default`)
+- `src-tauri/tauri.conf.json` — `tauri-plugin-opener` for browser URLs
 
 ## Edge Cases
 
-### Session Conflicts
-- Compare `modified` timestamps (remote vs local)
-- If remote newer: prompt "Remote version is newer. Overwrite local?"
-- If local newer: prompt "Local version is newer. Overwrite with remote?"
-- If equal (within 1s): skip silently
-- Provide "Download as copy" → generate new UUID
-
-### Unindexed Sessions
-- After download, add entry to local `sessions-index.json` immediately
-- Refresh UI sessions list
-- Show toast: "Session downloaded to {path}"
-
-### Keyring Unavailable
-- `github_start_device_flow_cmd()` fails early with `AppError::KeyringUnavailable`
-- Show user-friendly error: "OS keyring unavailable. Cannot store GitHub credentials."
-- Disable all GitHub sync UI
-
-### Network Failures
-- Retry OAuth polling up to 3 times on network errors
-- Show "Connection error. Retrying..." in device flow modal
-- For upload/download: show error toast with "Retry" button
-
-### Token Expiration (401 Unauthorized)
-- On any GitHub API 401: clear keyring token, set `is_connected: false`
-- Show notification: "GitHub connection expired. Please reconnect."
-- Redirect user to reconnect flow
-
-### Repo Doesn't Exist
-- First upload auto-creates repo via `POST /user/repos` with body `{"name": "claude-sessions", "private": true}`
-- If creation fails (rare): show instructions to create manually at github.com/new
-
-### Large Sessions
-- Check file size before upload: `fs::metadata(path)?.len()`
-- If > 95 MB: reject with error "Session too large for GitHub (95 MB+)"
-- GitHub blob limit is 100 MB; 5 MB buffer for base64 overhead
-
 ### Concurrent Uploads
-- Implement upload queue in frontend (one per project at a time)
-- Backend concurrency detection: since uploads are atomic commits via Git Data API, the unit of conflict is the branch ref (not individual files)
-- **Detection:** After building tree from `base_tree` (step 4) but before `PATCH .../git/refs/heads/{branch}` (step 6), re-fetch the ref
-- If ref SHA no longer matches the parent commit you built against: someone else committed in between
-- **Recovery:** Refetch new commit SHA and its tree SHA as new `base_tree`, rebuild your tree with new base, retry commit + PATCH
-- Max 3 retries per upload, then fail with "Conflict error. Try again."
+- Atomic per-commit via Git Data API; unit of conflict is the branch ref
+- Detection: rebuild against the new head on 422 from `create_ref` / `update_ref`
+- Recovery: max 3 retries (`MAX_ATTEMPTS` in `upload.rs`), then return the captured error
 
 ### Privacy Warning (First Upload)
-- **CRITICAL:** Transcripts contain full file contents, command output, and potentially credentials/secrets
-- Show explicit consent dialog before first upload: "This session may contain sensitive information (file contents, environment variables, command output). Upload to private GitHub repo?"
-- Store "consent given" flag in `github_sync.json` to avoid repeated prompts
-- Consider adding "review before upload" option showing file/command summary
+- Consent dialog in `GitHubSync.tsx`; `privacy_consent_given` flag in `github_sync.json`
+- Persists across reconnects (deliberate)
 
-### Session Index Corruption (Live Claude Code)
-- Claude Code writes to `sessions-index.json` continuously while active
-- Implement file locking before any read-modify-write on sessions-index.json
-- If lock fails or file modified in last 5 seconds: warn user "Claude Code may be running in this project. Close it before syncing."
-- Alternative: defer index update to Claude Code's next scan (just write .jsonl, don't touch index)
+### Keyring Unavailable
+- `github_poll_device_flow_cmd` and `load_github_token` both check `state.keyring.is_available()` up front
+- Returns `AppError::KeyringUnavailable`; UI shows the error via `ErrorBoundary` and offers no CTA (re-enabling keyring is OS-level)
+
+### Token Expiration (401)
+- `map_gh` maps 401 → `AppError::GitHubAuthRequired`
+- `RemoteSessionsTab.classifyError` shows "GitHub authentication expired." with CTA "Reconnect GitHub" → deep-links to `github-sync` tab
+- **Not auto-revoked:** the local token is not cleared on 401 (next successful call would clear it; for now the user reconnects manually)
+
+### Network Failures
+- `reqwest` timeouts (5s connect, 15s total) bubble as `GitHubError::Network` → `AppError::Internal`
+- Frontend keeps cached rows visible and shows the slim "Showing cached results — ..." banner with a Retry button (instead of throwing into the boundary)
+
+### Repo Doesn't Exist
+- `ensure_repo` creates on first use via `POST /user/repos` `{"name": "claude-sessions", "private": true}`
+- `get_repo` returning `Ok(None)` from `list_remote_sessions_cmd` short-circuits to `[]`
+
+### Large Sessions
+- `MAX_UPLOAD_BYTES = 95 * 1024 * 1024` (5MB buffer for base64 overhead)
+- Frontend is told to retry with a smaller session
+
+### Session Conflicts (Download)
+- Remote newer → `SessionDownloadConflict { kind: RemoteNewer }` → `window.confirm("Overwrite local?")` → retry with `force: true`
+- Local newer → `SessionDownloadConflict { kind: LocalNewer }` → `window.confirm("Overwrite with remote?")` → retry with `force: true`
+- Equal (within RFC3339 second precision) → silent download
+
+### Unindexed Sessions
+- After download, `upsert_into_sessions_index` registers the new `.jsonl` so Claude Code's own picker sees it
+- Local sessions list refreshes via `onDownloaded` callback
 
 ### Format Versioning
-- Claude Code's `.jsonl` and `sessions-index.json` formats are versioned and can change between releases
-- Read format version from sessions-index.json before writing
-- If version is unknown/unsupported: fail loudly with error rather than corrupting the index
-- Document which Claude Code versions this sync feature was tested against
-
-### Download as Copy (UUID Regeneration)
-- **WARNING:** Session JSONL may reference its own session_id internally (metadata, hooks, transcript_path fields)
-- Before shipping "download as copy", verify against real transcripts whether internal IDs exist
-- If internal references exist: implement full transcript rewrite, not just file rename
-- If no internal references: simple file rename with new UUID is sufficient
+- Reuses `storage::sessions::parse_session_transcript` for both local and remote files — single source of truth for the JSONL shape
 
 ### Path Mapping Staleness
-- Stored project_path_mappings.json entries can go stale if user moves project locally
-- Before auto-applying a stored mapping: verify the target directory exists and contains a `.jsonl` session
-- If mapping target is invalid: re-prompt user with ProjectPickerModal
-- Consider TTL or "last verified" timestamp on mappings
+- Stored `slug_mappings` are validated against the filesystem on every download — `mapped local folder does not exist: ...` triggers the picker again
+- `mappings` (original_path-keyed) are display-only and not validated
 
 ### Git Worktree Relationships
-- Claude Code resolves sessions across worktrees of the same repo natively
-- ProjectPickerModal currently treats projects as flat, independent directories
-- Sessions downloaded to the "wrong" worktree may not appear in Claude Code's native picker
-- **Future enhancement:** detect worktrees, show relationship in UI
-- **V1 workaround:** note in UI "If this project has worktrees, select the main working directory"
+- Same caveat as the original plan: the picker treats projects as flat directories. Future enhancement: detect worktrees.
 
 ### Retention Strategy (Future)
-- Sessions accumulate indefinitely; GitHub recommends staying under ~1GB per repo
-- No pruning implemented in v1
-- **Future phases:** "Delete remote sessions older than N days", manual cleanup UI
-- Consider showing repo size in GitHubSyncPanel
+- Not implemented; `BlobCacheStats` is exposed for a future settings UI but no eviction UI exists yet
+
+## Implementation Status
+
+| Phase | Status | Notes |
+|---|---|---|
+| Phase 1 — OAuth + Connection | ✅ Shipped | All 7 commands + `GitHubSyncPanel` working |
+| Phase 2 — Upload Session | ✅ Shipped | Single-session upload via row icon, conflict-free per-commit |
+| Phase 3 — Download Session | ✅ Shipped | `RemoteSessionsTab` + `ProjectPickerModal` + `github_download_session_cmd` |
+| Phase 4 — Edge Cases + Polish | 🟡 Partial | SHA-gate, blob cache, SWR localStorage, Shift+Refresh, error boundaries all done. Still open: retention/pruning, bulk operations, automatic 401-revocation, "download as copy" UUID regeneration |
+
+**Deliberately deferred:**
+- Bulk operations (upload/download all sessions per project)
+- Repo size warning UI (stats are exposed via `github_get_blob_cache_stats_cmd` and `BlobCacheStats`)
+- Git worktree awareness in the picker
+- "Download as copy" (UUID regeneration needs transcript-rewrite plumbing)
+- Using `manifest.json` — reserved, not yet written or read
+- Removing legacy `RemoteSessionsModal` (still referenced from old call sites; harmless)
 
 ## Verification Strategy
 
 ### Manual Testing Checklist
 1. OAuth flow: complete device flow, verify token in keyring
-2. Upload: click icon, verify session in GitHub repo (private)
-3. Download: fetch remote session, select project, verify appears in sessions list
-4. Path mapping: download session from `/home/user/foo` to different path, verify mapping persists
-5. Conflict: modify session locally and remotely, verify prompt on next sync
-6. Disconnect: verify token deleted, UI disabled
+2. Upload: click icon, verify session + per-project `metadata.json` in GitHub repo (private)
+3. Download: fetch remote session, select project, verify appears in sessions list with green icon
+4. Path mapping: download from `/home/user/foo` to a different path, verify `slug_mappings` persists
+5. Conflict: modify session locally and remotely, verify `window.confirm` prompt
+6. Disconnect: verify keyring cleared, in-memory cache cleared, blob cache cleared, UI updates
 7. Network timeout: disconnect network during upload, verify error handling
-8. Token revoke: revoke on GitHub, verify next upload clears local state
+8. Token revoke: revoke on GitHub, verify next list call surfaces "GitHub authentication expired." with Reconnect CTA
+9. **SHA-gate warm:** open Remote tab, switch tabs, switch back → second open should be 1 API call (verified by toggling DevTools network panel)
+10. **Shift+Refresh:** open Remote tab → click Refresh with Shift held → 2+N calls (cache fully invalidated)
+11. **Blob cache:** download the same session twice → second call should hit the on-disk cache (no `GET /git/blobs/{sha}` network call)
+12. **Blob cache eviction:** write 200 MB of blobs with `GITHUB_BLOB_CACHE_MAX_MB=50` → verify LRU eviction by mtime
+13. **SWR localStorage:** load Remote tab → reload the window → should paint instantly with cached rows + show "Refreshing" badge
 
-### Test OAuth Flow
-- Start flow → modal displays user code + "Open GitHub" button
-- Authorize in browser → modal shows success + username
-- Cancel flow → polling stops, no token stored
-- Wait for expiration → shows "expired" error
-
-### Test Upload
-- First upload → repo created (private), session uploaded, manifests created
-- Update session → re-upload, verify GitHub SHA updated
-- Large session (create dummy 100MB file) → rejected with clear error
-
-### Test Download
-- New project (no mapping) → modal prompts for project selection
-- Existing mapping → auto-downloads to mapped path, no prompt
-- Conflict (local newer) → dialog offers overwrite/keep local/download as copy
-- Unindexed project → session appears in list immediately after download
-
-## Implementation Phases
-
-### Phase 1: OAuth + Connection (3-4 days)
-- Implement GitHub device flow backend + frontend
-- Store token in keyring
-- GitHubSyncPanel UI
-- Test: complete flow, see username in settings
-
-### Phase 2: Upload Session (3-4 days)
-- Repo creation + file upload via GitHub API
-- Wire SessionRow GitHub icon
-- Manifest/metadata management
-- Test: upload session, verify in GitHub web UI
-
-### Phase 3: Download Session (4-5 days)
-- List remote sessions + download
-- ProjectPickerModal for path mapping
-- Conflict detection (timestamps)
-- Test: download to new project, resume session in Claude Code
-
-### Phase 4: Edge Cases + Polish (2-3 days)
-- Retry logic, token expiration handling
-- Large file detection, concurrent upload queue
-- Comprehensive error messages
-- Documentation
-
-**Total estimate:** 12-16 days for complete implementation + testing
+### Cargo Tests
+```bash
+cd src-tauri && cargo test
+```
+Unit tests live next to the code: `cache.rs` (default/clear/seed/SHA validation/roundtrip/eviction), `repo.rs` (diff_slugs, list_remote_sessions_with_diff splice semantics), `client.rs` (b64_decode line-wrap), `upload.rs` (retry behavior with mock), `commands/github_sync.rs` (slug_from_full_path, reclassify_state_file, conflict classification).
 
 ## Key Reused Patterns
 
-- **Keyring storage:** Reuse existing `keyring.rs` API (set_secret, get_secret, delete_token)
-- **Atomic writes:** Reuse `settings.rs` write pattern (temp file + fsync + atomic rename) for github_sync.json
-- **HTTP client:** Reuse existing `reqwest::blocking::Client` from tracker.rs
-- **IPC wrapper:** Reuse `call<T>(cmd, args)` pattern from api.ts
-- **Error serialization:** Reuse `AppError` enum and normalization
-- **Shell open:** Reuse `tauri-plugin-opener` for browser URLs
-- **Project slug encoding:** Reuse Claude Code's encoding pattern (replace all non-alphanumeric characters with `-`)
+- **Keyring storage:** Reuses `ProviderSecret::Custom { auth_token }` enum so `keyring.set_secret` / `get_secret` / `delete_token` work unchanged
+- **Atomic writes:** `storage::github_sync::write_session_sync_state_atomic` mirrors the temp-file + fsync + rename pattern from `storage::settings.rs`
+- **HTTP client:** Shared `OnceLock<Client>` in `client.rs` — connection-pooled across calls
+- **IPC wrapper:** `call<T>(cmd, args)` in `api.ts` (typed discriminated unions for `AppError`)
+- **Error serialization:** `AppError` enum normalized to `{ kind, ... }` JSON; `AppError` class on the frontend mirrors the `kind` strings
+- **Shell open:** `tauri-plugin-opener` for `verification_uri`
+- **Project slug encoding:** Read straight from the on-disk parent folder (`slug_from_full_path`) rather than re-deriving — sidesteps the lossy-encoding bug entirely
+- **GitHub API base64 wrapping:** `b64_decode` strips whitespace before decoding
 
 ## Critical Dependencies
 
-- GitHub OAuth App registration (obtain client_id before implementation)
-- `reqwest` crate (already in Cargo.toml)
+- `reqwest` crate (already in `Cargo.toml`)
 - `keyring` crate (already in use)
 - `tauri-plugin-opener` (already configured)
-- `base64` crate (add to Cargo.toml for GitHub API base64 encoding)
+- `base64` crate (added for GitHub API encoding)
+- `chrono` crate (added for RFC3339 timestamp formatting/comparison)
+- `tempfile` crate (added for atomic blob-cache writes + remote-transcript temp file)
+- GitHub OAuth App registration (obtain `client_id` before implementation — already done for the working setup)
