@@ -25,7 +25,8 @@ use crate::github::upload as gh_upload;
 use crate::models::{
     AppError, AppResult, GITHUB_KEYRING_ACCOUNT, GitHubAuthSecret, GitHubDeviceFlowStart,
     GitHubSyncConfig, ProjectPathMapping, ProjectPathMappings, ProjectRemoteMetadata,
-    ProviderSecret, RemoteSessionEntry, SessionSyncMetadata, SessionSyncStateFile, SyncState,
+    ProviderSecret, RemoteSessionEntry, RemoteSessionSummary, SessionSyncMetadata,
+    SessionSyncStateFile, SyncState,
 };
 use crate::state::AppState;
 use crate::storage::github_sync as storage;
@@ -520,6 +521,47 @@ pub fn github_check_repo_cmd(
 pub struct RepoProbeResult {
     pub full_name: String,
     pub default_branch: String,
+}
+
+// ===================================================================
+// Phase 3: list + download target
+// ===================================================================
+
+/// List every session in the GitHub sync repo, grouped by project.
+/// Returns `[]` when the repo doesn't exist yet (user hasn't uploaded).
+#[tauri::command]
+pub fn github_list_remote_sessions_cmd(
+    state: tauri::State<'_, AppState>,
+) -> AppResult<Vec<RemoteSessionSummary>> {
+    let cfg = storage::load_github_sync_config(&sync_config_path(&state))?;
+    if !cfg.is_connected {
+        return Err(AppError::GitHubNotConfigured("not_connected".into()));
+    }
+    let secret = load_github_token(&state)?;
+    let token = &secret.access_token;
+    let owner = gh_repo::get_authenticated_user(token).map_err(map_gh)?;
+
+    // If the repo doesn't exist, the user has never uploaded — empty list.
+    // Use get_repo (read-only), NOT gh_upload::ensure_repo, which would
+    // create the repo as a side effect.
+    let repo = gh_repo::get_repo(token, &owner, &cfg.repo_name).map_err(map_gh)?;
+    let Some(repo) = repo else {
+        return Ok(Vec::new());
+    };
+
+    gh_repo::list_remote_sessions(token, &owner, &cfg.repo_name, &repo.default_branch)
+        .map_err(map_gh)
+}
+
+/// Resolve the local target folder for a remote project slug, if a
+/// mapping already exists. Returns None to trigger the ProjectPicker.
+#[tauri::command]
+pub fn github_resolve_download_target_cmd(
+    state: tauri::State<'_, AppState>,
+    project_slug: String,
+) -> AppResult<Option<String>> {
+    let m = storage::load_path_mappings(&mappings_path(&state))?;
+    Ok(m.slug_mappings.get(&project_slug).cloned())
 }
 
 fn load_github_token(state: &AppState) -> AppResult<GitHubAuthSecret> {
