@@ -27,35 +27,35 @@ const SESSIONS_INDEX: &str = "sessions-index.json";
 
 /// Schema of Claude Code's per-project `sessions-index.json`. All fields
 /// optional except `version` + `entries` so an older index still parses.
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct SessionsIndex {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SessionsIndex {
     #[allow(dead_code)]
-    pub(crate) version: u32,
+    pub version: u32,
     #[serde(default)]
-    pub(crate) entries: Vec<SessionIndexEntry>,
+    pub entries: Vec<SessionIndexEntry>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SessionIndexEntry {
+pub struct SessionIndexEntry {
     #[serde(default)]
-    pub(crate) session_id: String,
+    pub session_id: String,
     #[serde(default)]
-    pub(crate) full_path: String,
+    pub full_path: String,
     #[serde(default)]
-    pub(crate) first_prompt: Option<String>,
+    pub first_prompt: Option<String>,
     #[serde(default)]
-    pub(crate) summary: Option<String>,
+    pub summary: Option<String>,
     #[serde(default)]
-    pub(crate) message_count: Option<u32>,
+    pub message_count: Option<u32>,
     #[serde(default)]
-    pub(crate) created: Option<String>,
+    pub created: Option<String>,
     #[serde(default)]
-    pub(crate) modified: Option<String>,
+    pub modified: Option<String>,
     #[serde(default)]
-    pub(crate) project_path: Option<String>,
+    pub project_path: Option<String>,
     #[serde(default)]
-    pub(crate) is_sidechain: Option<bool>,
+    pub is_sidechain: Option<bool>,
 }
 
 /// One row for the sidebar Sessions list. Slimmed to what the UI actually
@@ -712,6 +712,80 @@ fn tool_result_to_text(value: &Value) -> String {
     String::new()
 }
 
+/// Atomic read-modify-write on `<project_folder>/sessions-index.json`.
+/// Inserts or replaces the entry with matching `session_id`. Existing
+/// entries are preserved. Creates the index file (and its parent
+/// directories) if absent. Uses a sidecar lock file matching the
+/// pattern in `storage::github_sync::write_session_sync_state_atomic`
+/// to avoid races with a live Claude Code process appending to the
+/// same index.
+pub fn upsert_into_sessions_index(
+    project_folder: &Path,
+    entry: &SessionIndexEntry,
+) -> AppResult<()> {
+    use fs2::FileExt;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fs::create_dir_all(project_folder)?;
+    let index_path = project_folder.join(SESSIONS_INDEX);
+
+    // Sidecar lock — hold exclusively for the duration of the write.
+    let lock_path = {
+        let mut p = index_path.as_os_str().to_owned();
+        p.push(".lock");
+        PathBuf::from(p)
+    };
+    let lock_file = fs::File::options()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| AppError::Lock(e.to_string()))?;
+
+    let write_result = (|| -> AppResult<()> {
+        let mut index: SessionsIndex = match fs::read(&index_path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(SessionsIndex {
+                version: 1,
+                entries: Vec::new(),
+            }),
+            Err(_) => SessionsIndex {
+                version: 1,
+                entries: Vec::new(),
+            },
+        };
+        index.version = 1;
+        let existing = index
+            .entries
+            .iter()
+            .position(|e| e.session_id == entry.session_id);
+        match existing {
+            Some(i) => index.entries[i] = entry.clone(),
+            None => index.entries.push(entry.clone()),
+        }
+
+        let parent = index_path
+            .parent()
+            .unwrap_or(project_folder);
+        let mut tmp = NamedTempFile::new_in(parent)?;
+        let body = serde_json::to_vec_pretty(&index)?;
+        tmp.write_all(&body)?;
+        tmp.as_file().sync_all()?;
+        tmp.persist(&index_path).map_err(|e| {
+            AppError::Io(std::io::Error::other(format!(
+                "persist sessions-index.json: {e}"
+            )))
+        })?;
+        Ok(())
+    })();
+
+    let _ = lock_file.unlock();
+    write_result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1181,5 +1255,59 @@ mod tests {
             "(unindexed) no-title-here",
             "untitled unindexed sessions should keep the uuid placeholder"
         );
+    }
+
+    // ---- upsert_into_sessions_index ----
+
+    fn entry(id: &str, full_path: &str, summary: Option<&str>) -> SessionIndexEntry {
+        SessionIndexEntry {
+            session_id: id.to_string(),
+            full_path: full_path.to_string(),
+            first_prompt: None,
+            summary: summary.map(String::from),
+            message_count: Some(0),
+            created: Some("2026-07-11T10:00:00Z".to_string()),
+            modified: Some("2026-07-11T10:00:00Z".to_string()),
+            project_path: Some("/home/test".to_string()),
+            is_sidechain: Some(false),
+        }
+    }
+
+    #[test]
+    fn upsert_creates_index_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("projects/-home-test");
+        std::fs::create_dir_all(&folder).unwrap();
+        upsert_into_sessions_index(&folder, &entry("a", "/path/a.jsonl", None)).unwrap();
+        let raw = std::fs::read_to_string(folder.join("sessions-index.json")).unwrap();
+        assert!(raw.contains("\"sessionId\": \"a\""), "raw was:\n{raw}");
+        assert!(raw.contains("\"version\": 1"), "raw was:\n{raw}");
+    }
+
+    #[test]
+    fn upsert_preserves_existing_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("projects/-home-test");
+        std::fs::create_dir_all(&folder).unwrap();
+        upsert_into_sessions_index(&folder, &entry("a", "/path/a.jsonl", Some("first"))).unwrap();
+        upsert_into_sessions_index(&folder, &entry("b", "/path/b.jsonl", Some("second"))).unwrap();
+        let raw = std::fs::read_to_string(folder.join("sessions-index.json")).unwrap();
+        assert!(raw.contains("\"sessionId\": \"a\""), "raw was:\n{raw}");
+        assert!(raw.contains("\"sessionId\": \"b\""), "raw was:\n{raw}");
+        assert!(raw.contains("first"), "raw was:\n{raw}");
+    }
+
+    #[test]
+    fn upsert_replaces_existing_entry_by_session_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("projects/-home-test");
+        std::fs::create_dir_all(&folder).unwrap();
+        upsert_into_sessions_index(&folder, &entry("a", "/path/a-old.jsonl", Some("v1"))).unwrap();
+        upsert_into_sessions_index(&folder, &entry("a", "/path/a-new.jsonl", Some("v2"))).unwrap();
+        let raw = std::fs::read_to_string(folder.join("sessions-index.json")).unwrap();
+        assert!(raw.contains("a-new.jsonl"), "raw was:\n{raw}");
+        assert!(!raw.contains("a-old.jsonl"), "raw was:\n{raw}");
+        assert!(raw.contains("v2"), "raw was:\n{raw}");
+        assert!(!raw.contains("v1"), "raw was:\n{raw}");
     }
 }
