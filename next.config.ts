@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   trailingSlash: true,
-  assetPrefix: isDev && host ? `http://${host}:3000` : undefined,
+  assetPrefix: isDev && host ? `http://${host}:42713` : undefined,
   reactStrictMode: true,
 };
 

@@ -120,7 +120,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-The dev command launches the Next.js dev server on port 3000 and opens a Tauri window pointing at it.
+The dev command launches the Next.js dev server on port 42713 and opens a Tauri window pointing at it.
 
 ## Build from source
 
