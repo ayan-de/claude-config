@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod anthropic_admin;
 pub mod anthropic_compat;
+pub mod claude_cli;
 pub mod freemodel;
 pub mod manual_json;
 pub mod minimax;
@@ -40,6 +41,7 @@ pub mod subscription;
 
 pub use anthropic_admin::AnthropicAdminSource;
 pub use anthropic_compat::AnthropicCompatSource;
+pub use claude_cli::ClaudeCliSource;
 pub use freemodel::FreeModelSource;
 pub use manual_json::ManualJsonSource;
 pub use minimax::MiniMaxSource;
@@ -51,6 +53,7 @@ pub use subscription::SubscriptionSource;
 pub enum SourceId {
     AnthropicAdmin,
     AnthropicCompat,
+    ClaudeCli,
     Subscription,
     ManualJson,
     MiniMax,
@@ -62,6 +65,7 @@ impl SourceId {
         match self {
             SourceId::AnthropicAdmin => "anthropic_admin",
             SourceId::AnthropicCompat => "anthropic_compat",
+            SourceId::ClaudeCli => "claude_cli",
             SourceId::Subscription => "subscription",
             SourceId::ManualJson => "manual_json",
             SourceId::MiniMax => "minimax",
@@ -76,6 +80,7 @@ impl SourceId {
         match s {
             "anthropic_admin" => Ok(SourceId::AnthropicAdmin),
             "anthropic_compat" => Ok(SourceId::AnthropicCompat),
+            "claude_cli" => Ok(SourceId::ClaudeCli),
             "subscription" => Ok(SourceId::Subscription),
             "manual_json" => Ok(SourceId::ManualJson),
             "minimax" => Ok(SourceId::MiniMax),
@@ -206,6 +211,7 @@ impl SourceRegistry {
         let sources: Vec<Arc<dyn TrackerSource>> = vec![
             Arc::new(AnthropicAdminSource),
             Arc::new(AnthropicCompatSource),
+            Arc::new(ClaudeCliSource),
             Arc::new(SubscriptionSource),
             Arc::new(MiniMaxSource),
             Arc::new(FreeModelSource),
@@ -224,6 +230,7 @@ impl SourceRegistry {
         let mut ids = [
             SourceId::AnthropicAdmin,
             SourceId::AnthropicCompat,
+            SourceId::ClaudeCli,
             SourceId::Subscription,
             SourceId::MiniMax,
             SourceId::FreeModel,
@@ -283,6 +290,7 @@ mod tests {
         let ids: Vec<String> = r.list().into_iter().map(|s| s.id).collect();
         assert!(ids.iter().any(|s| s == "anthropic_admin"));
         assert!(ids.iter().any(|s| s == "anthropic_compat"));
+        assert!(ids.iter().any(|s| s == "claude_cli"));
         assert!(ids.iter().any(|s| s == "subscription"));
         assert!(ids.iter().any(|s| s == "manual_json"));
         assert!(ids.iter().any(|s| s == "minimax"));
@@ -301,6 +309,7 @@ mod tests {
         for id in [
             SourceId::AnthropicAdmin,
             SourceId::AnthropicCompat,
+            SourceId::ClaudeCli,
             SourceId::Subscription,
             SourceId::ManualJson,
             SourceId::MiniMax,

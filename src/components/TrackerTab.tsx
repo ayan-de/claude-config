@@ -112,6 +112,7 @@ function pickSourceForProvider(
 
   // Kind-based defaults.
   if (kind === "console" && ids.has("anthropic_admin")) return "anthropic_admin";
+  if (kind === "subscription" && ids.has("claude_cli")) return "claude_cli";
   if (kind === "subscription" && ids.has("subscription")) return "subscription";
   if (kind === "custom" && ids.has("anthropic_compat")) return "anthropic_compat";
 
