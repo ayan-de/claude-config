@@ -207,7 +207,38 @@ pub fn check_scheduling_available_cmd(
         subscription_oauth_present,
         native_scheduling_present,
         scheduler_kind: sync::scheduler_kind().to_string(),
+        os: std::env::consts::OS.to_string(),
+        linux_distro: detect_linux_distro(),
     })
+}
+
+/// On Linux, read `/etc/os-release` and return the `ID` plus `ID_LIKE`
+/// (space-joined, lowercased) so the UI can pick a distro-specific cron
+/// install guide. `None` off Linux or when the file is unreadable.
+#[cfg(target_os = "linux")]
+fn detect_linux_distro() -> Option<String> {
+    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+    let mut id: Option<String> = None;
+    let mut id_like: Option<String> = None;
+    for line in text.lines() {
+        let unquote = |v: &str| v.trim().trim_matches('"').to_lowercase();
+        if let Some(v) = line.strip_prefix("ID=") {
+            id = Some(unquote(v));
+        } else if let Some(v) = line.strip_prefix("ID_LIKE=") {
+            id_like = Some(unquote(v));
+        }
+    }
+    match (id, id_like) {
+        (Some(a), Some(b)) => Some(format!("{a} {b}")),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_linux_distro() -> Option<String> {
+    None
 }
 
 #[tauri::command]

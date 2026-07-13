@@ -538,4 +538,8 @@ export interface SchedulingAvailability {
   nativeSchedulingPresent: boolean;
   /** "crontab" | "schtasks" | "none". */
   schedulerKind: string;
+  /** Host OS: "linux" | "macos" | "windows" | other. */
+  os: string;
+  /** Linux `/etc/os-release` ID + ID_LIKE, lowercased. Drives the distro guide. */
+  linuxDistro?: string;
 }

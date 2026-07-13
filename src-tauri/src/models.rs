@@ -718,6 +718,12 @@ pub struct SchedulingAvailability {
     pub native_scheduling_present: bool,
     /// Human label for the scheduler: "crontab", "schtasks", or "none".
     pub scheduler_kind: String,
+    /// Host OS: "linux", "macos", "windows", or another `std::env::consts::OS`.
+    pub os: String,
+    /// On Linux, the `/etc/os-release` `ID` plus `ID_LIKE` (space-joined,
+    /// lowercased) so the UI can show a distro-specific "install cron" guide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linux_distro: Option<String>,
 }
 
 #[cfg(test)]

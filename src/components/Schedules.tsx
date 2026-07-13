@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   AlarmClockCheck,
   AlarmClockOff,
   ArrowLeft,
   CalendarClock,
+  Check,
   CircleAlert,
+  Copy,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
+  Terminal,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -230,21 +234,169 @@ export function SchedulesView({ onClose }: GlobalTabProps) {
   );
 }
 
+/** An OS-specific "how to get a scheduler" guide, or `null` when the scheduler
+ *  is already available. */
+interface SetupGuide {
+  heading: string;
+  body: string;
+  /** Shell commands the user runs to install/enable the scheduler. */
+  commands: string[];
+  /** Optional verification command shown after the install steps. */
+  verify?: string;
+}
+
+function schedulerSetupGuide(a: SchedulingAvailability): SetupGuide | null {
+  if (a.schedulerAvailable) return null;
+
+  if (a.os === "macos") {
+    return {
+      heading: "Enable cron access on macOS",
+      body: "cron ships with macOS, but your terminal/app may need Full Disk Access to edit the crontab: System Settings → Privacy & Security → Full Disk Access. Then confirm crontab works:",
+      commands: [],
+      verify: "crontab -l",
+    };
+  }
+
+  if (a.os === "windows") {
+    return {
+      heading: "Task Scheduler not found",
+      body: "schtasks.exe ships with Windows. Make sure C:\\Windows\\System32 is on your PATH and the Task Scheduler service is running, then reopen the app.",
+      commands: [],
+      verify: "schtasks /Query",
+    };
+  }
+
+  // Linux — pick by distro family.
+  const d = a.linuxDistro ?? "";
+  if (/\barch\b|manjaro|endeavour|garuda|omarchy|cachyos/.test(d)) {
+    return {
+      heading: "Install cron on Arch",
+      body: "Arch ships without a cron daemon. Install cronie and enable its service:",
+      commands: [
+        "sudo pacman -S --needed cronie",
+        "sudo systemctl enable --now cronie",
+      ],
+      verify: "command -v crontab && systemctl is-active cronie",
+    };
+  }
+  if (/debian|ubuntu|mint|pop|elementary|raspbian|kali/.test(d)) {
+    return {
+      heading: "Install cron on Debian/Ubuntu",
+      body: "Install the cron package and enable its service:",
+      commands: [
+        "sudo apt update && sudo apt install -y cron",
+        "sudo systemctl enable --now cron",
+      ],
+      verify: "command -v crontab && systemctl is-active cron",
+    };
+  }
+  if (/fedora|rhel|centos|rocky|almalinux|alma\b/.test(d)) {
+    return {
+      heading: "Install cron on Fedora/RHEL",
+      body: "Install cronie and enable the crond service:",
+      commands: [
+        "sudo dnf install -y cronie",
+        "sudo systemctl enable --now crond",
+      ],
+      verify: "command -v crontab && systemctl is-active crond",
+    };
+  }
+  if (/suse|sles/.test(d)) {
+    return {
+      heading: "Install cron on openSUSE",
+      body: "Install cron and enable its service:",
+      commands: [
+        "sudo zypper install -y cron",
+        "sudo systemctl enable --now cron",
+      ],
+      verify: "command -v crontab && systemctl is-active cron",
+    };
+  }
+  return {
+    heading: "Install a cron daemon",
+    body: "Your Linux distribution has no crontab. Install a cron implementation (cronie is the common one) and enable its service, then reopen the app.",
+    commands: [],
+    verify: "command -v crontab",
+  };
+}
+
+function CommandLine({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      toast.success("Copied");
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5">
+      <Terminal className="size-3 shrink-0 text-muted-foreground/70" />
+      <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px]">
+        {command}
+      </code>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        onClick={() => void copy()}
+        aria-label="Copy command"
+      >
+        {copied ? (
+          <Check className="size-3 text-emerald-500" />
+        ) : (
+          <Copy className="size-3" />
+        )}
+      </Button>
+    </div>
+  );
+}
+
+function SchedulerGuideCard({ guide }: { guide: SetupGuide }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+      <div className="flex items-start gap-2 text-amber-700 dark:text-amber-300">
+        <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-semibold">{guide.heading}</span>
+          <span className="text-[11px] opacity-90">{guide.body}</span>
+        </div>
+      </div>
+      {guide.commands.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {guide.commands.map((c) => (
+            <CommandLine key={c} command={c} />
+          ))}
+        </div>
+      )}
+      {guide.verify && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Then verify
+          </span>
+          <CommandLine command={guide.verify} />
+        </div>
+      )}
+      <span className="text-[11px] text-muted-foreground">
+        After that, click <span className="font-medium">Refresh</span> above.
+      </span>
+    </div>
+  );
+}
+
 function AvailabilityWarnings({
   availability,
 }: {
   availability: SchedulingAvailability | null;
 }) {
   if (!availability) return null;
+  const guide = schedulerSetupGuide(availability);
   const warnings: string[] = [];
   if (!availability.claudeOnPath) {
     warnings.push(
-      "The `claude` CLI isn't on your PATH. Primers can't run until it is installed and on PATH.",
-    );
-  }
-  if (!availability.schedulerAvailable) {
-    warnings.push(
-      "No OS scheduler was found. Schedules can't be installed on this machine.",
+      "The `claude` CLI isn't on your PATH. Primers can't run until it's installed and on PATH.",
     );
   }
   if (!availability.subscriptionOauthPresent) {
@@ -253,12 +405,17 @@ function AvailabilityWarnings({
     );
   }
 
-  if (warnings.length === 0 && !availability.nativeSchedulingPresent) {
+  if (
+    !guide &&
+    warnings.length === 0 &&
+    !availability.nativeSchedulingPresent
+  ) {
     return null;
   }
 
   return (
     <div className="flex flex-col gap-2">
+      {guide && <SchedulerGuideCard guide={guide} />}
       {warnings.map((w) => (
         <div
           key={w}
@@ -520,7 +677,7 @@ function ScheduleFormBody({
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!canSave) return;
     // Preserve weekday order (Mon..Sun) regardless of click order.
