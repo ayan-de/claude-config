@@ -55,6 +55,48 @@ feedback in the UI.
 - Command naming convention is `<verb>_<noun>_cmd`; all frontend IPC goes
   through `src/lib/api.ts` (never `invoke()` in components).
 
+## Why not native Claude Code scheduling?
+
+As of April 2026, Claude Code ships two native scheduling features that overlap
+with this design. We evaluated both and still chose custom OS-cron. This
+section exists so a reviewer familiar with current Claude Code sees the
+reasoning up front.
+
+- **Cloud Routines** ([docs](https://code.claude.com/docs/en/routines)) —
+  research preview, launched 2026-04-14. Scheduled/API/GitHub triggers, run on
+  Anthropic infrastructure even with the machine off, created via
+  `claude.ai/code`, the Desktop app, or the CLI `/schedule` *slash* command.
+  Routines "share the same subscription usage quota as interactive sessions."
+- **Desktop Scheduled Tasks**
+  ([docs](https://code.claude.com/docs/en/desktop-scheduled-tasks)) — task defs
+  at `~/.claude/scheduled-tasks/<name>/SKILL.md` (honors `CLAUDE_CONFIG_DIR`),
+  fire while the Desktop app is open and awake.
+
+Why they don't replace this feature:
+
+1. **No native *local* scheduler on Linux.** The docs state plainly that Linux
+   users must use CLI `/loop`, Cloud Routines, or "traditional cron jobs
+   running `claude -p` in headless mode." Desktop Scheduled Tasks are macOS +
+   Windows only. This app is Linux-first, so custom cron is the *recommended*
+   path there, not reinvention.
+2. **`claude -p` on OAuth is the surest primer.** It is a normal interactive
+   message on the subscription token, so it deterministically starts the exact
+   local 5-hour window the tracker measures. A cloud Routine only "shares the
+   same quota" — strongly implied to reset the same window, but an inference,
+   not a documented guarantee. Cron sidesteps the question.
+3. **No headless create API.** Routines are created via interactive `/schedule`
+   or the web; Desktop tasks via the Routines page / natural-language MCP tools,
+   and their schedule/enabled state isn't even in the on-disk `SKILL.md`. An app
+   "just orchestrating native scheduling" would have to drive an interactive
+   session — brittle and undocumented.
+4. **Research preview + web-gated.** Routines require Claude Code on the web
+   enabled and may change; we can't assume every user has them.
+
+`check_scheduling_available_cmd` should additionally detect an existing native
+setup — presence of `~/.claude/scheduled-tasks/` (honoring `CLAUDE_CONFIG_DIR`)
+— and surface a one-line note that native Routines/Desktop Tasks are an
+alternative, so our schedules don't silently compete with theirs.
+
 ## Architecture & data flow
 
 ```
@@ -115,7 +157,8 @@ New module `src-tauri/src/schedule/`:
   - `sync_schedules_cmd` — idempotent regen (also called at launch)
   - `get_schedule_status_cmd` — per-schedule last run + computed next fire time
   - `check_scheduling_available_cmd` — `claude` on PATH? scheduler present?
-    subscription OAuth present? → drives UI warnings
+    subscription OAuth present? native `scheduled-tasks/` dir present? → drives
+    UI warnings and the "native alternative" note
   - `run_primer_now_cmd` — fire a primer immediately ("Prime now" test button)
 
 ## Frontend
@@ -167,12 +210,26 @@ New module `src-tauri/src/schedule/`:
 1. **OAuth token staleness** in the primer dir (the CLI rotates the token).
    Mitigated by symlink (unix) / refresh-copy at launch (Windows); a failed
    run is visible and self-heals.
-2. **macOS cron** may require Full Disk Access; launchd is a possible future
+2. **`CLAUDE_CONFIG_DIR` isolation is imperfect (undocumented feature).**
+   - Issue #3833: tool-permission local state (`settings.local.json`) can be
+     written to the CWD rather than the config dir. Unlikely to matter for a
+     bare `"hi"` prompt with no tool use — covered by a test.
+   - On **Windows**, some global state (`~\.claude.json`) has been reported as
+     shared across config-dir "profiles" rather than isolated. This weakens the
+     Windows refresh-copy isolation trick; verify the primer still targets the
+     subscription and not a leaked provider override. If isolation proves
+     unreliable on Windows, fall back to running the primer only when the
+     Subscription provider is the active one.
+3. **macOS cron** may require Full Disk Access; launchd is a possible future
    refinement over crontab.
-3. **Machine must be on and logged in** at fire time — inherent to any local
+4. **Machine must be on and logged in** at fire time — inherent to any local
    scheduler; cron does not wake the machine.
-4. **Cron entries persist after app uninstall** unless cleaned up — documented;
-   "disable all" / delete removes the managed block.
+5. **Artifacts persist after app uninstall** unless cleaned up — the managed
+   cron block / Scheduled Tasks **and** the copied Windows credential file under
+   `primer-config/`. "Disable all" / delete removes the managed block and the
+   primer-config dir (including the credential copy); document that uninstall
+   without first disabling leaves them behind. A stale rotated-token copy is not
+   a leak but is an artifact to clean up.
 
 ## Out of scope for v1 (possible future work)
 
