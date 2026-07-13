@@ -231,8 +231,24 @@ New module `src-tauri/src/schedule/`:
    without first disabling leaves them behind. A stale rotated-token copy is not
    a leak but is an artifact to clean up.
 
+## Machine-off / missed-run behavior
+
+Cron and Scheduled Tasks only fire while the machine is **powered on and logged
+in**; a shut-down or asleep machine misses the run (cron cannot wake or power on
+the box). To recover the common "booted at 8:05, the 7:30 primer was skipped"
+case, **v1 includes catch-up-on-launch**: at app start, `sync_schedules_cmd`
+checks each enabled schedule's most recent fire time against the run-log; if the
+most recent expected fire was missed and is within a small window (e.g. today),
+it fires that schedule once (at most one catch-up per schedule, discarding older
+misses — same shape as Desktop Tasks' catch-up). Firing multiple missed days is
+pointless since only the latest window matters.
+
+Waking the machine from sleep to fire (RTC wake via `rtcwake` / `pmset schedule
+wake` / Windows wake timers) is **out of scope for v1** — see future work.
+
 ## Out of scope for v1 (possible future work)
 
 - Per-schedule provider targeting (prime GLM/Kimi windows too).
 - launchd-native scheduling on macOS.
+- RTC wake-from-sleep so primers fire on a sleeping machine.
 - Best-effort cron cleanup on uninstall.
