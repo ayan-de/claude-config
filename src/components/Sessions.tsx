@@ -586,6 +586,11 @@ function SessionRow({ session, onSelect, onRequestDelete }: RowProps) {
           <p className="line-clamp-2 text-xs font-medium text-foreground/90 group-hover:text-foreground">
             {session.title}
           </p>
+          {session.recap && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+              {session.recap}
+            </p>
+          )}
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
             <span>
               {session.message_count > 0

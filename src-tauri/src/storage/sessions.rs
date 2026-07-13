@@ -67,6 +67,11 @@ pub struct SessionSummary {
     /// placeholder. Already truncated server-side so the UI doesn't
     /// repeat the work.
     pub title: String,
+    /// Claude Code "away recap" (`type=system, subtype=away_summary`
+    /// transcript record), latest one, with the trailing
+    /// "(disable recaps in /config)" hint stripped. `None` when the
+    /// session never generated one.
+    pub recap: Option<String>,
     pub message_count: u32,
     /// ISO-8601 string from Claude's index. Drives the "5m ago" label
     /// and the sort key.
@@ -185,16 +190,18 @@ fn merge_index_into(
         if !seen.insert(entry.session_id.clone()) {
             continue;
         }
-        let title_from_jsonl = if entry.full_path.is_empty() {
-            None
+        let (title_from_jsonl, recap) = if entry.full_path.is_empty() {
+            (None, None)
         } else {
-            extract_title_from_jsonl(Path::new(&entry.full_path))
+            let path = Path::new(&entry.full_path);
+            (extract_title_from_jsonl(path), extract_recap_from_jsonl(path))
         };
         let title = title_from_jsonl
             .unwrap_or_else(|| pick_title(entry.summary.as_deref(), entry.first_prompt.as_deref()));
         out.push(SessionSummary {
             session_id: entry.session_id,
             title,
+            recap,
             message_count: entry.message_count.unwrap_or(0),
             modified: entry.modified.or(entry.created),
             project_name: entry
@@ -238,6 +245,7 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
         .unwrap_or_else(|| format!("(unindexed) {}", session_id));
     Some(SessionSummary {
         title,
+        recap: extract_recap_from_jsonl(path),
         session_id,
         message_count: 0,
         modified,
@@ -371,6 +379,49 @@ pub fn extract_title_from_jsonl(path: &Path) -> Option<String> {
         .or_else(|| extract_last_string_field(tail, "aiTitle"))
         .or_else(|| extract_last_string_field(head, "aiTitle"));
     title.map(|s| truncate_chars(&s, TITLE_MAX_CHARS))
+}
+
+/// Trailing hint Claude Code appends to every away recap; stripped
+/// before the text hits the UI.
+const RECAP_SUFFIX: &str = "(disable recaps in /config)";
+
+/// Returns the latest "away recap" from the transcript: the last
+/// `type=system, subtype=away_summary` record's `content`. Recaps are
+/// written when the user steps away, so the tail window almost always
+/// has it; the head window is a fallback for short sessions.
+pub fn extract_recap_from_jsonl(path: &Path) -> Option<String> {
+    const WINDOW: u64 = 64 * 1024;
+    let tail = read_tail_bytes(path, WINDOW).ok()?;
+    if let Some(r) = recap_from_lines(std::str::from_utf8(&tail).ok()?) {
+        return Some(r);
+    }
+    let head = read_head_bytes(path, WINDOW).ok()?;
+    recap_from_lines(std::str::from_utf8(&head).ok()?)
+}
+
+fn recap_from_lines(text: &str) -> Option<String> {
+    for line in text.lines().rev() {
+        if !line.contains("\"away_summary\"") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        if value.get("subtype").and_then(Value::as_str) != Some("away_summary") {
+            continue;
+        }
+        let content = value.get("content").and_then(Value::as_str)?;
+        let content = content
+            .trim_end()
+            .strip_suffix(RECAP_SUFFIX)
+            .unwrap_or(content)
+            .trim_end();
+        if content.is_empty() {
+            return None;
+        }
+        return Some(truncate_chars(content, TITLE_MAX_CHARS));
+    }
+    None
 }
 
 /// Returns the first `max_bytes` of the file. Always line-aligned at
@@ -1255,6 +1306,51 @@ mod tests {
             "(unindexed) no-title-here",
             "untitled unindexed sessions should keep the uuid placeholder"
         );
+    }
+
+    // ---- extract_recap_from_jsonl ----
+
+    #[test]
+    fn recap_from_jsonl_strips_suffix_and_takes_last() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",",
+                "\"content\":\"Old recap. (disable recaps in /config)\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",",
+                "\"content\":\"Building the carousel, next: verify layout. (disable recaps in /config)\"}\n",
+            ),
+        );
+        assert_eq!(
+            extract_recap_from_jsonl(&path).as_deref(),
+            Some("Building the carousel, next: verify layout."),
+        );
+    }
+
+    #[test]
+    fn recap_from_jsonl_none_when_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_transcript(
+            tmp.path(),
+            "s.jsonl",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        );
+        assert_eq!(extract_recap_from_jsonl(&path), None);
+    }
+
+    #[test]
+    fn recap_reaches_session_summary_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "projects/-home-test/r.jsonl",
+            "{\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"Did the thing (disable recaps in /config)\"}\n",
+        );
+        let out = scan_sessions(tmp.path()).unwrap();
+        assert_eq!(out[0].recap.as_deref(), Some("Did the thing"));
     }
 
     // ---- upsert_into_sessions_index ----

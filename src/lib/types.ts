@@ -332,6 +332,9 @@ export interface SessionSummary {
   session_id: string;
   /** Summary or first prompt, truncated server-side. */
   title: string;
+  /** Latest "away recap" from the transcript, suffix-stripped; null when
+   * the session never generated one. */
+  recap: string | null;
   message_count: number;
   /** RFC 3339 timestamp of last activity; drives the "5m ago" label. */
   modified: string | null;
