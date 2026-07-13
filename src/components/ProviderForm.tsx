@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -39,6 +39,7 @@ import { kindLabel, maskToken as appMaskToken } from "@/lib/utils-app";
 import {
   CUSTOM_SENTINEL,
   PRESET_PROVIDERS,
+  fetchPresetLogo,
   getPresetApiKeyUrl,
 } from "@/lib/presetProviders";
 import { importCurrentSubscription } from "@/lib/api";
@@ -170,6 +171,9 @@ export function ProviderForm({
                     {opt.description}
                   </p>
                 </div>
+                {opt.kind === "custom" && (
+                  <RelayPresetAvatars />
+                )}
                 <ChevronRight className="size-4 text-muted-foreground group-hover:text-foreground shrink-0" />
               </button>
             ))}
@@ -1025,6 +1029,46 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
       {f.logoError && (
         <p className="text-xs text-destructive text-center mt-2">{f.logoError}</p>
       )}
+    </div>
+  );
+}
+
+/** Preset avatars shown beside the "Custom relay" row on the kind picker.
+ *  Renders inline via ProviderLogo so they theme through --logo-color the
+ *  same way ProviderCard logos do. Logos are module-cached after first
+ *  fetch, so the row paints instantly on subsequent opens. */
+const RELAY_AVATAR_IDS = ["zenmux", "freemodel"] as const;
+
+function RelayPresetAvatars() {
+  const [svgs, setSvgs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    Promise.all(RELAY_AVATAR_IDS.map((id) => fetchPresetLogo(id))).then(
+      (results) => {
+        if (!alive) return;
+        const next: Record<string, string> = {};
+        results.forEach((svg, i) => {
+          if (svg) next[RELAY_AVATAR_IDS[i]] = svg;
+        });
+        setSvgs(next);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      {RELAY_AVATAR_IDS.map((id) => (
+        <div
+          key={id}
+          className="size-5 rounded-full border bg-muted/20 flex items-center justify-center overflow-hidden"
+          aria-label={id}
+        >
+          <ProviderLogo svg={svgs[id]} size={20} className="rounded-full" />
+        </div>
+      ))}
+      <span className="text-[10px] text-muted-foreground">&amp; more</span>
     </div>
   );
 }
