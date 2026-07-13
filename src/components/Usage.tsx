@@ -120,6 +120,10 @@ export function UsageView({ onClose }: GlobalTabProps) {
           return next;
         });
       }
+      // Sync the sidebar's `useProvidersApp` cache with the fresh usage.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tracker-changed"));
+      }
     } catch (e) {
       toast.error(`Refresh failed: ${(e as Error).message}`);
     } finally {
@@ -150,6 +154,10 @@ export function UsageView({ onClose }: GlobalTabProps) {
       }
       return next;
     });
+    // Sync the sidebar's `useProvidersApp` cache with the fresh usage.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tracker-changed"));
+    }
     setRefreshing({});
   }, [usageByProvider, loadUsage]);
 
