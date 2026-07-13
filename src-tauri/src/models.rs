@@ -586,6 +586,140 @@ pub struct DownloadResult {
     pub sync_state: SyncState,
 }
 
+// ===================================================================
+// Scheduled window primers
+// ===================================================================
+
+/// Weekday for a schedule's recurrence set. Serialized lowercase
+/// (`"mon".."sun"`) to keep `schedules.json` and the TS mirror compact.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum Weekday {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+    Sat,
+    Sun,
+}
+
+impl Weekday {
+    /// Cron day-of-week number. Cron uses 0=Sunday .. 6=Saturday.
+    pub fn cron_num(self) -> u32 {
+        match self {
+            Weekday::Sun => 0,
+            Weekday::Mon => 1,
+            Weekday::Tue => 2,
+            Weekday::Wed => 3,
+            Weekday::Thu => 4,
+            Weekday::Fri => 5,
+            Weekday::Sat => 6,
+        }
+    }
+
+    pub fn from_chrono(w: chrono::Weekday) -> Self {
+        match w {
+            chrono::Weekday::Mon => Weekday::Mon,
+            chrono::Weekday::Tue => Weekday::Tue,
+            chrono::Weekday::Wed => Weekday::Wed,
+            chrono::Weekday::Thu => Weekday::Thu,
+            chrono::Weekday::Fri => Weekday::Fri,
+            chrono::Weekday::Sat => Weekday::Sat,
+            chrono::Weekday::Sun => Weekday::Sun,
+        }
+    }
+}
+
+/// A recurring primer: a local time on a set of weekdays. When enabled it is
+/// rendered into the OS scheduler (crontab / Scheduled Tasks) which fires the
+/// generated wrapper script. No secrets live here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Schedule {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Local 24h "HH:MM".
+    pub time: String,
+    /// Recurrence weekdays; empty is invalid (rejected on write).
+    pub days: Vec<Weekday>,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// What the frontend posts to create or edit a schedule. `id` is `None` for a
+/// create, `Some` for an edit.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    pub time: String,
+    pub days: Vec<Weekday>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SchedulesFile {
+    pub schema_version: u32,
+    pub schedules: Vec<Schedule>,
+}
+
+impl Default for SchedulesFile {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            schedules: Vec::new(),
+        }
+    }
+}
+
+/// One primer execution, appended to `runs.jsonl`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRun {
+    pub schedule_id: String,
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Per-schedule status shown in the UI: last recorded run + computed next fire.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleStatus {
+    pub schedule_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<ScheduleRun>,
+    /// Next fire time as RFC3339 local, or `None` if disabled / no days.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_fire: Option<String>,
+}
+
+/// Prerequisites for scheduling to work, surfaced as UI warnings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulingAvailability {
+    /// `claude` binary is on PATH.
+    pub claude_on_path: bool,
+    /// The OS scheduler binary (crontab / schtasks) is present.
+    pub scheduler_available: bool,
+    /// Subscription OAuth exists in `.credentials.json`.
+    pub subscription_oauth_present: bool,
+    /// A native Claude Code `scheduled-tasks/` dir exists (Routines / Desktop
+    /// Tasks) — used to surface the "native alternative" note.
+    pub native_scheduling_present: bool,
+    /// Human label for the scheduler: "crontab", "schtasks", or "none".
+    pub scheduler_kind: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,5 +923,89 @@ mod tests {
         }"#;
         let s: RemoteSessionSummary = serde_json::from_str(raw).unwrap();
         assert_eq!(s.sync_action, SyncAction::Download);
+    }
+
+    #[test]
+    fn weekday_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&Weekday::Mon).unwrap(), "\"mon\"");
+        assert_eq!(serde_json::to_string(&Weekday::Sun).unwrap(), "\"sun\"");
+        let w: Weekday = serde_json::from_str("\"fri\"").unwrap();
+        assert_eq!(w, Weekday::Fri);
+    }
+
+    #[test]
+    fn weekday_cron_num_maps_sun_zero() {
+        assert_eq!(Weekday::Sun.cron_num(), 0);
+        assert_eq!(Weekday::Mon.cron_num(), 1);
+        assert_eq!(Weekday::Sat.cron_num(), 6);
+        assert_eq!(Weekday::from_chrono(chrono::Weekday::Wed), Weekday::Wed);
+    }
+
+    #[test]
+    fn schedule_round_trips_camel_case() {
+        let s = Schedule {
+            id: "abc".into(),
+            label: Some("Morning".into()),
+            time: "07:30".into(),
+            days: vec![Weekday::Mon, Weekday::Fri],
+            enabled: true,
+            created_at: "2026-07-14T00:00:00Z".into(),
+            updated_at: "2026-07-14T00:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"createdAt\""), "json: {json}");
+        assert!(json.contains("\"time\":\"07:30\""));
+        assert!(json.contains("[\"mon\",\"fri\"]"));
+        let back: Schedule = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn schedule_label_omitted_when_none() {
+        let s = Schedule {
+            id: "abc".into(),
+            label: None,
+            time: "16:30".into(),
+            days: vec![Weekday::Sun],
+            enabled: false,
+            created_at: "2026-07-14T00:00:00Z".into(),
+            updated_at: "2026-07-14T00:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("label"), "json: {json}");
+    }
+
+    #[test]
+    fn schedules_file_default_is_v1_empty() {
+        let f = SchedulesFile::default();
+        assert_eq!(f.schema_version, 1);
+        assert!(f.schedules.is_empty());
+    }
+
+    #[test]
+    fn schedule_input_accepts_missing_id_and_label() {
+        let raw = r#"{"time":"07:30","days":["mon","tue"],"enabled":true}"#;
+        let input: ScheduleInput = serde_json::from_str(raw).unwrap();
+        assert!(input.id.is_none());
+        assert!(input.label.is_none());
+        assert_eq!(input.days, vec![Weekday::Mon, Weekday::Tue]);
+        assert!(input.enabled);
+    }
+
+    #[test]
+    fn schedule_run_round_trips() {
+        let r = ScheduleRun {
+            schedule_id: "abc".into(),
+            started_at: "2026-07-14T07:30:00Z".into(),
+            exit_code: Some(0),
+            ok: true,
+            error: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"scheduleId\":\"abc\""));
+        assert!(json.contains("\"exitCode\":0"));
+        assert!(!json.contains("error"));
+        let back: ScheduleRun = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, r);
     }
 }

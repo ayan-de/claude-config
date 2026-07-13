@@ -15,10 +15,15 @@ import type {
   ProviderInput,
   RemoteSessionSummary,
   RepoProbeResult,
+  Schedule,
+  ScheduleInput,
+  ScheduleStatus,
+  SchedulingAvailability,
   SessionMessage,
   SessionSummary,
   SessionSyncMetadata,
   SessionSyncStateFile,
+  ScheduleRun,
   SkillSummary,
   SyncState,
   TrackerConfigView,
@@ -351,3 +356,38 @@ export const githubGetBlobCacheStats = () =>
   call<{ fileCount: number; totalBytes: number }>(
     "github_get_blob_cache_stats_cmd",
   );
+
+// ---------- schedules ----------
+//
+// Scheduled window primers. The flow is:
+//   1. checkSchedulingAvailable() — gate the UI on prerequisites.
+//   2. listSchedules() / getScheduleStatus() — render rows + last/next run.
+//   3. add/update/delete/setScheduleEnabled — mutate; the backend re-syncs
+//      the primer config, wrapper script, and OS scheduler block.
+//   4. runPrimerNow(id) — fire a primer immediately ("Prime now").
+//   5. syncSchedules() — force an idempotent regeneration (rarely needed).
+
+export const listSchedules = () => call<Schedule[]>("list_schedules_cmd");
+
+export const addSchedule = (input: ScheduleInput) =>
+  call<Schedule>("add_schedule_cmd", { input });
+
+export const updateSchedule = (input: ScheduleInput) =>
+  call<Schedule>("update_schedule_cmd", { input });
+
+export const deleteSchedule = (id: string) =>
+  call<void>("delete_schedule_cmd", { id });
+
+export const setScheduleEnabled = (id: string, enabled: boolean) =>
+  call<Schedule>("set_schedule_enabled_cmd", { id, enabled });
+
+export const syncSchedules = () => call<void>("sync_schedules_cmd");
+
+export const getScheduleStatus = () =>
+  call<ScheduleStatus[]>("get_schedule_status_cmd");
+
+export const checkSchedulingAvailable = () =>
+  call<SchedulingAvailability>("check_scheduling_available_cmd");
+
+export const runPrimerNow = (id: string) =>
+  call<ScheduleRun>("run_primer_now_cmd", { id });

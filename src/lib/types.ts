@@ -482,3 +482,60 @@ export type SyncAction = "download" | "update" | "conflict" | "in_sync";
  * `"session_download_conflict"`).
  */
 export type SessionConflictKind = "remote_newer" | "local_newer";
+
+// ---------------------------------------------------------------------------
+// Scheduled window primers
+// ---------------------------------------------------------------------------
+// Mirrors the schedule structs in `src-tauri/src/models.rs` (camelCase serde).
+
+/** Weekday in a schedule's recurrence set. Serialized lowercase. */
+export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** A recurring primer definition. Mirrors `Schedule` in `models.rs`. */
+export interface Schedule {
+  id: string;
+  label?: string;
+  /** Local 24h "HH:MM". */
+  time: string;
+  days: Weekday[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Create/edit payload. Mirrors `ScheduleInput` in `models.rs`. `id` omitted
+ *  for create, present for edit. */
+export interface ScheduleInput {
+  id?: string;
+  label?: string;
+  time: string;
+  days: Weekday[];
+  enabled: boolean;
+}
+
+/** One primer execution from `runs.jsonl`. Mirrors `ScheduleRun`. */
+export interface ScheduleRun {
+  scheduleId: string;
+  startedAt: string;
+  exitCode?: number;
+  ok: boolean;
+  error?: string;
+}
+
+/** Per-schedule status: last run + computed next fire. Mirrors `ScheduleStatus`. */
+export interface ScheduleStatus {
+  scheduleId: string;
+  lastRun?: ScheduleRun;
+  /** RFC3339 local next-fire time, or absent when disabled / no days. */
+  nextFire?: string;
+}
+
+/** Scheduling prerequisites. Mirrors `SchedulingAvailability`. */
+export interface SchedulingAvailability {
+  claudeOnPath: boolean;
+  schedulerAvailable: boolean;
+  subscriptionOauthPresent: boolean;
+  nativeSchedulingPresent: boolean;
+  /** "crontab" | "schtasks" | "none". */
+  schedulerKind: string;
+}

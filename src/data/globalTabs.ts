@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  CalendarClock,
   Cloud,
   FileText,
   History,
@@ -28,6 +29,10 @@ import {
   McpSidebarButton,
   McpView,
 } from "@/components/Mcp";
+import {
+  SchedulesSidebarButton,
+  SchedulesView,
+} from "@/components/Schedules";
 import { SessionsSidebarButton, SessionsView } from "@/components/Sessions";
 import {
   SkillsSidebarButton,
@@ -129,6 +134,15 @@ export const GLOBAL_TABS: readonly GlobalTab[] = [
       "Claude Code conversation sessions stored on this PC. Click a row to read the transcript.",
     SidebarButton: SessionsSidebarButton,
     Component: SessionsView,
+  },
+  {
+    id: "schedules",
+    label: "Schedules",
+    icon: CalendarClock,
+    tooltip:
+      "Schedule tiny primers that reset your Claude subscription's 5-hour usage window at times you choose — fired by your OS scheduler even when this app is closed.",
+    SidebarButton: SchedulesSidebarButton,
+    Component: SchedulesView,
   },
   {
     id: "usage",
