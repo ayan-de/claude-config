@@ -382,21 +382,48 @@ pub fn github_set_path_mapping_cmd(
             "both original_path and local_path are required".into(),
         ));
     }
+    // The picker's "Browse..." lets the user choose any raw folder on disk
+    // (e.g. their source project root), but downloaded sessions must land
+    // in Claude Code's encoded folder under `~/.claude/projects/`, not the
+    // raw path — otherwise `/resume` never sees them. Only folders already
+    // inside `~/.claude/projects/` (i.e. picked from the dropdown) are used
+    // verbatim; anything else gets resolved/created via the same encoding
+    // Claude Code itself uses.
+    let projects_dir = discover_claude_dir().join(PROJECTS_DIR);
+    let local_resolved = if Path::new(local).starts_with(&projects_dir) {
+        local.to_string()
+    } else {
+        let slug_dir = projects_dir.join(encode_claude_project_slug(local));
+        std::fs::create_dir_all(&slug_dir)?;
+        slug_dir.display().to_string()
+    };
+
     let path = mappings_path(&state);
     let mut m = storage::load_path_mappings(&path)?;
     m.version = 1;
     // Canonical key: original decoded path.
     m.mappings
-        .insert(original.to_string(), local.to_string());
+        .insert(original.to_string(), local_resolved.clone());
     // Slug-keyed lookup so download resolvers hit without re-prompting.
     if let Some(s) = slug {
         let s = s.trim();
         if !s.is_empty() {
-            m.slug_mappings.insert(s.to_string(), local.to_string());
+            m.slug_mappings.insert(s.to_string(), local_resolved);
         }
     }
     storage::save_path_mappings(&path, &m)?;
     Ok(())
+}
+
+/// Claude Code's on-disk project slug encoding: `/` and `.` both collapse
+/// to `-` (e.g. `/home/foo/.claude` -> `-home-foo--claude`). Only used to
+/// resolve a brand-new project folder the user picked via "Browse..."; any
+/// slug already on disk is read verbatim, never re-derived.
+fn encode_claude_project_slug(raw_path: &str) -> String {
+    raw_path
+        .chars()
+        .map(|c| if c == '/' || c == '.' { '-' } else { c })
+        .collect()
 }
 
 #[tauri::command]
@@ -1144,6 +1171,18 @@ pub fn github_list_local_projects_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_claude_project_slug_matches_real_encoding() {
+        assert_eq!(
+            encode_claude_project_slug("/home/ayande/Project/openscrim"),
+            "-home-ayande-Project-openscrim"
+        );
+        assert_eq!(
+            encode_claude_project_slug("/home/ayande/.claude"),
+            "-home-ayande--claude"
+        );
+    }
 
     #[test]
     fn slug_is_the_on_disk_parent_folder_name() {

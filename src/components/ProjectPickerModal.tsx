@@ -65,7 +65,10 @@ export function ProjectPickerModal({
           value={selected}
           onChange={(e) => setSelected(e.target.value)}
         >
-          {projects.map((p) => (
+          {(projects.includes(selected) || !selected
+            ? projects
+            : [selected, ...projects]
+          ).map((p) => (
             <option key={p} value={p}>
               {p}
             </option>
