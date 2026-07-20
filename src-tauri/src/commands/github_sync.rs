@@ -998,6 +998,7 @@ pub fn github_download_session_cmd(
         .find(|m| m.role == "user")
         .map(|m| m.content.clone())
         .filter(|s| !s.is_empty());
+    let project_path = crate::storage::sessions::read_cwd_from_transcript(&target_jsonl);
     let entry = crate::storage::sessions::SessionIndexEntry {
         session_id: session_id.clone(),
         full_path: target_jsonl.display().to_string(),
@@ -1006,7 +1007,7 @@ pub fn github_download_session_cmd(
         message_count: Some(message_count),
         created: Some(now.clone()),
         modified: Some(now.clone()),
-        project_path: None,
+        project_path,
         is_sidechain: Some(false),
     };
     crate::storage::sessions::upsert_into_sessions_index(&target_path, &entry)?;
