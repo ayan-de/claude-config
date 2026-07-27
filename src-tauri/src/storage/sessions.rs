@@ -263,7 +263,7 @@ fn summary_from_jsonl_stat(path: &Path) -> Option<SessionSummary> {
 /// first real turn.
 const CWD_SCAN_LINES: usize = 32;
 
-fn read_cwd_from_transcript(path: &Path) -> Option<String> {
+pub(crate) fn read_cwd_from_transcript(path: &Path) -> Option<String> {
     let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
     for line in reader.lines().take(CWD_SCAN_LINES) {

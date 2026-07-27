@@ -8,6 +8,7 @@ mod commands;
 mod github;
 mod merge;
 mod models;
+mod schedule;
 mod state;
 mod storage;
 mod tracker;
@@ -62,6 +63,19 @@ pub fn run() {
                 log::warn!("first-launch import skipped: {e}");
             }
 
+            // Recover from manual crontab edits / partial state, then fire any
+            // primer that was missed while the machine was off (catch-up). Runs
+            // off-thread so launch isn't blocked on `crontab`/`claude` I/O.
+            let launch_state = app.state::<AppState>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = schedule::sync::sync_schedules(&launch_state) {
+                    log::warn!("launch schedule sync failed: {e}");
+                }
+                if let Err(e) = schedule::sync::catch_up_on_launch(&launch_state) {
+                    log::warn!("launch catch-up failed: {e}");
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -101,6 +115,15 @@ pub fn run() {
             commands::tracker::refresh_tracker_cmd,
             commands::tracker::get_tracker_usage_cmd,
             commands::tracker::list_tracker_usage_cmd,
+            commands::schedule::list_schedules_cmd,
+            commands::schedule::add_schedule_cmd,
+            commands::schedule::update_schedule_cmd,
+            commands::schedule::delete_schedule_cmd,
+            commands::schedule::set_schedule_enabled_cmd,
+            commands::schedule::sync_schedules_cmd,
+            commands::schedule::get_schedule_status_cmd,
+            commands::schedule::check_scheduling_available_cmd,
+            commands::schedule::run_primer_now_cmd,
             commands::github_sync::get_github_sync_config_cmd,
             commands::github_sync::github_start_device_flow_cmd,
             commands::github_sync::github_poll_device_flow_cmd,

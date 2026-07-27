@@ -35,4 +35,34 @@ impl AppState {
     pub fn trackers_path(&self) -> PathBuf {
         self.app_data_dir.join("trackers.json")
     }
+
+    /// Scheduled window primers (recurrence definitions). No secrets.
+    pub fn schedules_path(&self) -> PathBuf {
+        self.app_data_dir.join("schedules.json")
+    }
+    /// Append-only primer run-log written by the generated wrapper script.
+    pub fn runs_path(&self) -> PathBuf {
+        self.app_data_dir.join("runs.jsonl")
+    }
+    /// Isolated `CLAUDE_CONFIG_DIR` the primer runs under: an empty `env` block
+    /// (forces OAuth fallback) plus a symlink/copy of `.credentials.json`.
+    pub fn primer_config_dir(&self) -> PathBuf {
+        self.app_data_dir.join("primer-config")
+    }
+    /// Directory holding the generated wrapper script(s).
+    pub fn scripts_dir(&self) -> PathBuf {
+        self.app_data_dir.join("scripts")
+    }
+    /// Absolute path to the generated primer wrapper script. Baked into the
+    /// crontab / Scheduled Task line, so it must be stable.
+    pub fn wrapper_path(&self) -> PathBuf {
+        #[cfg(windows)]
+        {
+            self.scripts_dir().join("primer.cmd")
+        }
+        #[cfg(not(windows))]
+        {
+            self.scripts_dir().join("primer.sh")
+        }
+    }
 }

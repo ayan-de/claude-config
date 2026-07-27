@@ -9,6 +9,7 @@ import { useGitHubSyncContext } from "@/hooks/GitHubSyncContext";
 import { useRemoteSessions } from "@/hooks/useRemoteSessions";
 import { RemoteSessionsList } from "@/components/RemoteSessionsList";
 import { RemoteSessionDetail } from "@/components/RemoteSessionDetail";
+import { ProjectPickerModal } from "@/components/ProjectPickerModal";
 import type { RemoteSessionSummary } from "@/lib/types";
 import { AppError } from "@/lib/api";
 import type { GlobalTabId } from "@/data/globalTabs";
@@ -34,6 +35,7 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
   const { sessions, loading, error, refresh, download, transcripts, loadTranscript } =
     useRemoteSessions();
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [pickerRow, setPickerRow] = useState<RemoteSessionSummary | null>(null);
 
   // The hook's own mount effect handles the initial refresh — including
 // the localStorage-seeded instant-paint + background reconcile path.
@@ -54,13 +56,7 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
 
   const handleDownload = (row: RemoteSessionSummary) => {
     void download(row, {
-      onNeedPicker: () => {
-        // Project picker only exists inside the modal flow. For the in-tab
-        // preview, we surface the missing mapping via a toast. The actual
-        // picker integration is out of scope — the modal continues to be
-        // the primary download surface.
-        // (See UI-10 for full picker wiring via GlobalTabProps.)
-      },
+      onNeedPicker: () => setPickerRow(row),
       onDone: () => onDownloaded(),
     });
   };
@@ -228,6 +224,23 @@ export function RemoteSessionsTab({ onDownloaded, onNavigate }: Props) {
             onDownload={handleDownload}
           />
         </ErrorBoundary>
+      )}
+
+      {pickerRow && (
+        <ProjectPickerModal
+          open
+          onClose={() => setPickerRow(null)}
+          remoteOriginalPath={pickerRow.originalPath}
+          remoteSlug={pickerRow.projectSlug}
+          onPicked={() => {
+            const row = pickerRow;
+            setPickerRow(null);
+            void download(row, {
+              onNeedPicker: () => setPickerRow(row),
+              onDone: () => onDownloaded(),
+            });
+          }}
+        />
       )}
     </div>
   );
