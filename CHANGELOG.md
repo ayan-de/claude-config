@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-27
+
+### Added
+- **Scheduled window primers** — schedule primer runs with run logging and native OS integration; availability detection reports the host OS and shows distro-specific setup guides when the scheduler is missing
+- **Project picker for session downloads** — remote sessions resolve their target project via a picker modal, with the project path read back from the transcript and stored as a path mapping
+- **Session recap** — `recap` field on the session summary, surfaced in session rows
+- **Claude CLI tracker source** — OAuth usage tracking reads from the Claude CLI
+- **Custom relay avatars** in the provider form kind picker
+
+### Changed
+- Usage sidebar cache syncs with fresh usage data on refresh
+
 ## [0.8.0] - 2026-07-11
 
 ### Added
