@@ -1,0 +1,18 @@
+# Maintainer: Ayan De <deayan252@gmail.com>
+pkgname=claude-config-bin
+pkgver=0.9.0
+pkgrel=1
+pkgdesc="Cross-platform provider manager for Claude Code"
+arch=('x86_64')
+url="https://github.com/ayan-de/claude-config"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3')
+provides=('claude-config')
+conflicts=('claude-config')
+options=('!strip')
+source=("$pkgname-$pkgver.deb::$url/releases/download/v$pkgver/Claude.Config_${pkgver}_amd64.deb")
+sha256sums=('c8d9beb911686aef536a144fec95b8547b16df765158c32e384a49614bb03d15')
+
+package() {
+  bsdtar -xf data.tar.gz -C "$pkgdir"
+}
