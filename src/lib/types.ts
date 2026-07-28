@@ -543,3 +543,27 @@ export interface SchedulingAvailability {
   /** Linux `/etc/os-release` ID + ID_LIKE, lowercased. Drives the distro guide. */
   linuxDistro?: string;
 }
+
+/** Managed CLIProxyAPI state. Mirrors `ProxyStatus` in
+ *  `src-tauri/src/commands/proxy.rs`. */
+export interface ProxyStatus {
+  /** Binary is on disk under the app data dir. */
+  installed: boolean;
+  /** Version recorded at install time. */
+  version?: string;
+  /** Something answers `/healthz` on the port. */
+  running: boolean;
+  /** That something is our child process, so we can stop it. */
+  managed: boolean;
+  port: number;
+  /** Base URL to use as a provider's `base_url`. */
+  baseUrl: string;
+  /** Login-flow ids that already have a stored credential. */
+  connected: string[];
+}
+
+/** One subscription OAuth flow the proxy supports. Mirrors `LoginFlow`. */
+export interface ProxyLoginFlow {
+  id: string;
+  label: string;
+}

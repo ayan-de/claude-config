@@ -116,6 +116,27 @@ impl KeyringStore {
         }
     }
 
+    /// Like `get_secret`, but a provider that simply has no stored secret is
+    /// `Ok(None)` rather than an error. Tokenless providers — a local relay
+    /// with no API key — never write an entry, so "missing" is a normal state
+    /// for them and must stay distinguishable from a broken keyring.
+    pub fn get_secret_opt(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<ProviderSecret>, KeyringError> {
+        self.ensure_available()?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
+            .map_err(|e| KeyringError::Backend(e.to_string()))?;
+        match entry.get_password() {
+            Ok(raw) => Ok(Some(
+                serde_json::from_str::<ProviderSecret>(&raw)
+                    .unwrap_or(ProviderSecret::Custom { auth_token: raw }),
+            )),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(KeyringError::Backend(e.to_string())),
+        }
+    }
+
     /// Legacy helper: write a raw auth token for a Custom-kind provider.
     /// Wraps `set_secret` with `ProviderSecret::Custom` so callers that only
     /// have a token string (legacy tests) keep working.

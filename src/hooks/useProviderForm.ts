@@ -14,6 +14,24 @@ import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
  *  validator so the form rejects the upload before the round-trip. */
 const MAX_LOGO_SVG_CHARS = 50 * 1024;
 
+/** Whether a base URL points at this machine. Local relays run
+ *  unauthenticated, so they don't need an auth token. Mirrors `is_loopback`
+ *  in `commands/providers.rs` — keep the two in step.
+ *
+ *  `URL.hostname` keeps the brackets on IPv6 literals, hence the strip. */
+function isLoopbackUrl(raw: string): boolean {
+  try {
+    const host = new URL(raw.trim()).hostname.replace(/^\[|\]$/g, "");
+    return (
+      host.toLowerCase() === "localhost" ||
+      host === "::1" ||
+      /^127\.\d+\.\d+\.\d+$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 interface UseProviderFormProps {
   editing: Provider | null;
   /** Kind picked in step 1 of the wizard. Locked to the editing provider's
@@ -173,6 +191,10 @@ export function useProviderForm({
     if (editing) return null; // secret optional on edit for every kind
     switch (kind) {
       case "custom":
+        // Local relays (the managed CLIProxyAPI, anything on loopback) run
+        // unauthenticated, so no token is the correct answer there. Mirrors
+        // the `is_loopback` check in `commands/providers.rs`.
+        if (isLoopbackUrl(baseUrl)) return null;
         return authToken.trim() ? null : "Required when creating";
       case "console":
         return apiKey.trim() ? null : "Required when creating";
@@ -418,6 +440,8 @@ export function useProviderForm({
     derivedName,
     urlError,
     secretError,
+    /** True when the auth token may be left blank (local relay). */
+    tokenOptional: kind === "custom" && isLoopbackUrl(baseUrl),
     timeoutError,
     hasErrors,
     canSubmit,

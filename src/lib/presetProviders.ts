@@ -32,6 +32,15 @@ export interface PresetProvider {
 
 export const PRESET_PROVIDERS: readonly PresetProvider[] = [
   {
+    // ponytail: raster mark wrapped in an <svg><image data:uri> so it flows
+    // through the SVG-only logo pipeline. Swap for a real vector if one appears.
+    id: "cliproxyapi",
+    name: "CLIProxyAPI (local)",
+    baseUrl: "http://localhost:8317",
+    logoPath: "/logos/cliproxyapi.svg",
+    apiKeyUrl: "https://help.router-for.me/",
+  },
+  {
     id: "zai",
     name: "Z.ai (Zhipu GLM)",
     baseUrl: "https://api.z.ai/api/anthropic",

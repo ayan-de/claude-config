@@ -54,6 +54,8 @@ pub fn run() {
                 github_cache: Arc::new(std::sync::Mutex::new(GitHubCache::default())),
             };
             app.manage(app_state);
+            // Handle to the CLIProxyAPI process we manage, if any.
+            app.manage(commands::proxy::ProxyChild::default());
 
             // First-launch auto-import: if providers.json doesn't exist yet,
             // capture any config already on disk (Custom env vars in
@@ -98,6 +100,13 @@ pub fn run() {
             commands::providers::update_provider_cmd,
             commands::providers::delete_provider_cmd,
             commands::providers::validate_provider_cmd,
+            commands::providers::discover_models_cmd,
+            commands::proxy::proxy_status_cmd,
+            commands::proxy::proxy_login_flows_cmd,
+            commands::proxy::install_proxy_cmd,
+            commands::proxy::start_proxy_cmd,
+            commands::proxy::stop_proxy_cmd,
+            commands::proxy::proxy_login_cmd,
             commands::settings::get_active_provider_cmd,
             commands::settings::load_provider_cmd,
             commands::settings::save_current_as_provider_cmd,

@@ -162,10 +162,15 @@ pub fn provider_env_block(provider: &Provider, secret: &ProviderSecret) -> Map<S
                 env.insert("ANTHROPIC_BASE_URL".into(), Value::String(url.clone()));
             }
             if let ProviderSecret::Custom { auth_token } = secret {
-                env.insert(
-                    "ANTHROPIC_AUTH_TOKEN".into(),
-                    Value::String(auth_token.clone()),
-                );
+                // A local relay can legitimately have no token. Omitting the
+                // key (rather than writing "") makes the provider-authoritative
+                // merge drop any stale value from settings.json.
+                if !auth_token.trim().is_empty() {
+                    env.insert(
+                        "ANTHROPIC_AUTH_TOKEN".into(),
+                        Value::String(auth_token.clone()),
+                    );
+                }
             }
         }
         ProviderKind::Bedrock => {
@@ -380,6 +385,28 @@ mod tests {
         assert_eq!(env.get("ANTHROPIC_API_KEY").unwrap(), "sk-ant-abc");
         assert!(env.get("ANTHROPIC_BASE_URL").is_none());
         assert!(env.get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn env_block_custom_omits_blank_token() {
+        // A local relay (managed CLIProxyAPI) has no API key. The base URL
+        // must still be written, and the token key must be absent rather than
+        // empty so the merge strips any stale value.
+        let mut p = base_provider(ProviderKind::Custom);
+        p.base_url = Some("http://localhost:8317".into());
+        for blank in ["", "   "] {
+            let env = provider_env_block(
+                &p,
+                &ProviderSecret::Custom {
+                    auth_token: blank.into(),
+                },
+            );
+            assert_eq!(env.get("ANTHROPIC_BASE_URL").unwrap(), "http://localhost:8317");
+            assert!(
+                env.get("ANTHROPIC_AUTH_TOKEN").is_none(),
+                "blank token must not be written"
+            );
+        }
     }
 
     #[test]

@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { CliProxyPanel } from "@/components/CliProxyPanel";
 import { LoopVideo } from "@/components/LoopVideo";
 import { TrackerTab } from "@/components/TrackerTab";
 import { cn } from "@/lib/utils";
@@ -42,7 +43,7 @@ import {
   fetchPresetLogo,
   getPresetApiKeyUrl,
 } from "@/lib/presetProviders";
-import { importCurrentSubscription } from "@/lib/api";
+import { discoverModels, importCurrentSubscription } from "@/lib/api";
 import type { Provider, ProviderInput, ProviderKind } from "@/lib/types";
 import { useProviderForm } from "@/hooks/useProviderForm";
 
@@ -248,6 +249,28 @@ function KindForm({
   setTab,
 }: KindFormProps) {
   const f = useProviderForm({ editing, kind, onSave, isSaving });
+
+  // Model ids pulled from the relay's /v1/models, offered as datalist
+  // suggestions on the model fields. Empty until the user asks for them.
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+
+  async function handleDiscoverModels() {
+    setDiscovering(true);
+    try {
+      const ids = await discoverModels(
+        f.baseUrl,
+        f.authToken || undefined,
+        editing?.id,
+      );
+      setDiscoveredModels(ids);
+      toast.success(`Found ${ids.length} models`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDiscovering(false);
+    }
+  }
 
   async function handleImportSubscription() {
     setImporting(true);
@@ -579,12 +602,43 @@ function KindForm({
 
             {modelsExpanded && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {/* Suggestions shared by every model field below. */}
+                <datalist id="discovered-models">
+                  {discoveredModels.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
+                {kind === "custom" && (
+                  <div className="col-span-1 md:col-span-2 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={discovering || !f.baseUrl.trim()}
+                      onClick={handleDiscoverModels}
+                      className="h-7 text-xs"
+                    >
+                      {discovering ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-3.5" />
+                      )}
+                      Discover models
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground">
+                      {discoveredModels.length > 0
+                        ? `${discoveredModels.length} suggestions available`
+                        : "Ask the endpoint which models it serves"}
+                    </span>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label htmlFor="model" className="text-xs">
                     Default
                   </Label>
                   <Input
                     id="model"
+                    list="discovered-models"
                     value={f.model}
                     onChange={(e) => f.setModel(e.target.value)}
                     placeholder="claude-sonnet-4-6"
@@ -597,6 +651,7 @@ function KindForm({
                   </Label>
                   <Input
                     id="smallFastModel"
+                    list="discovered-models"
                     value={f.smallFastModel}
                     onChange={(e) => f.setSmallFastModel(e.target.value)}
                     placeholder="claude-haiku-4-5"
@@ -609,6 +664,7 @@ function KindForm({
                   </Label>
                   <Input
                     id="defaultSonnetModel"
+                    list="discovered-models"
                     value={f.defaultSonnetModel}
                     onChange={(e) => f.setDefaultSonnetModel(e.target.value)}
                     className="font-mono text-xs"
@@ -620,6 +676,7 @@ function KindForm({
                   </Label>
                   <Input
                     id="defaultOpusModel"
+                    list="discovered-models"
                     value={f.defaultOpusModel}
                     onChange={(e) => f.setDefaultOpusModel(e.target.value)}
                     className="font-mono text-xs"
@@ -631,6 +688,7 @@ function KindForm({
                   </Label>
                   <Input
                     id="defaultHaikuModel"
+                    list="discovered-models"
                     value={f.defaultHaikuModel}
                     onChange={(e) => f.setDefaultHaikuModel(e.target.value)}
                     className="font-mono text-xs"
@@ -940,6 +998,9 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         </p>
       </div>
 
+      {/* The managed local proxy is the one preset the app can set up itself. */}
+      {f.selectedPresetId === "cliproxyapi" && <CliProxyPanel />}
+
       <div className="flex items-start gap-4">
         {/* Left column: Circular logo preview / upload */}
         <div className="shrink-0 pt-1.5 flex flex-col items-center gap-1.5">
@@ -1024,6 +1085,7 @@ function CustomKindFields({ editing, f }: CustomKindFieldsProps) {
         <p className="text-[10px] text-muted-foreground">
           Sets <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code>.
           Stored in OS keyring.
+          {f.tokenOptional && " Optional for a local relay — leave blank if it has no API key."}
         </p>
       </div>
       {f.logoError && (

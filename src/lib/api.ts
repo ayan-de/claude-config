@@ -29,6 +29,8 @@ import type {
   TrackerConfigView,
   TrackerSourceDescriptor,
   TrackerUsage,
+  ProxyStatus,
+  ProxyLoginFlow,
 } from "./types";
 
 interface RawError {
@@ -146,6 +148,24 @@ export const deleteProvider = (id: string) =>
   call<void>("delete_provider_cmd", { id });
 export const validateProvider = (input: ProviderInput) =>
   call<void>("validate_provider_cmd", { input });
+/** Ask a relay's `/v1/models` endpoint which models it serves. Pass the
+ *  provider `id` when editing: the form has no token, so the backend reads
+ *  the stored one from the keyring. */
+export const discoverModels = (baseUrl: string, token?: string, id?: string) =>
+  call<string[]>("discover_models_cmd", { baseUrl, token, id });
+
+// ---------- managed CLIProxyAPI ----------
+
+export const proxyStatus = () => call<ProxyStatus>("proxy_status_cmd");
+export const proxyLoginFlows = () =>
+  call<ProxyLoginFlow[]>("proxy_login_flows_cmd");
+/** Download (or update to) the latest release. Returns the version. */
+export const installProxy = () => call<string>("install_proxy_cmd");
+export const startProxy = () => call<void>("start_proxy_cmd");
+export const stopProxy = () => call<void>("stop_proxy_cmd");
+/** Runs one subscription's OAuth flow. Blocks until the browser flow ends. */
+export const proxyLogin = (provider: string) =>
+  call<void>("proxy_login_cmd", { provider });
 
 // ---------- settings ----------
 

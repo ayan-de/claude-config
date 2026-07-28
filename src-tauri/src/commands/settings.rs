@@ -56,7 +56,7 @@ pub fn get_active_provider_cmd(
         if p.kind == ProviderKind::Subscription {
             continue;
         }
-        let secret = match state.keyring.get_secret(&p.id) {
+        let secret = match resolve_secret(&state, &p) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -73,6 +73,23 @@ pub fn get_active_provider_cmd(
         }
     }
     Ok(None)
+}
+
+/// Fetch a provider's secret, tolerating the one case where none exists: a
+/// Custom relay saved without an auth token (a local proxy that needs none).
+/// Any other kind with a missing entry is still an error — a Console provider
+/// without its API key is broken, not tokenless.
+fn resolve_secret(state: &AppState, provider: &Provider) -> AppResult<ProviderSecret> {
+    match state.keyring.get_secret_opt(&provider.id)? {
+        Some(secret) => Ok(secret),
+        None if provider.kind == ProviderKind::Custom => Ok(ProviderSecret::Custom {
+            auth_token: String::new(),
+        }),
+        None => Err(AppError::Keyring(format!(
+            "no stored secret for provider {}",
+            provider.id
+        ))),
+    }
 }
 
 #[tauri::command]
@@ -107,8 +124,9 @@ pub fn load_provider_cmd(
         }
     }
 
-    // Step 2: load the new provider's secret.
-    let secret = state.keyring.get_secret(&new_provider.id)?;
+    // Step 2: load the new provider's secret. A Custom provider may have none
+    // (local relay with no API key), which is not an error.
+    let secret = resolve_secret(&state, &new_provider)?;
     if secret.kind() != new_provider.kind {
         return Err(AppError::Internal(format!(
             "keyring secret kind ({:?}) does not match provider kind ({:?}) for {}",
@@ -241,7 +259,7 @@ pub fn preview_provider_env_cmd(
         .into_iter()
         .find(|p| p.id == id)
         .ok_or_else(|| AppError::NotFound(id.clone()))?;
-    let secret = state.keyring.get_secret(&id)?;
+    let secret = resolve_secret(&state, &provider)?;
     Ok(provider_env_block(&provider, &secret))
 }
 
